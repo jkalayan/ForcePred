@@ -29,6 +29,25 @@ def force_pred(input_files='input_files'):
     print(molecule.energies)
 
 
+    '''          
+    methanal = OPTParser(['../test/methanal_scan.out'])
+    #print(methanal.get_3D_array(methanal.forces))
+    #print(methanal.__dict__)
+    print(methanal)
+    print(methanal.energies)
+
+    #methanal.iterate_files(['../test/ethanediol-scan-test.out'])
+    #print(methanal)
+    #print(methanal.energies)
+
+    ethanediol = OPTParser(['../test/ethanediol-scan-test.out'])
+    #print(ethanediol.__dict__)
+    print(ethanediol)
+    #ethanediol.forces = ethanediol.get_3D_array(ethanediol.forces)
+    #print(ethanediol.forces)
+    '''
+
+
 
     print(datetime.now() - startTime)
 
