@@ -7,12 +7,13 @@ __maintainer__ = 'Jas Kalayan'
 __email__ = 'jkalayan@gmail.com'
 __status__ = 'Development'
 
-import sys
-sys.path.append('..') #package is in parent directory
-import ForcePred
-from ForcePred import OPTParser
 from datetime import datetime
 import argparse
+
+import sys
+from ForcePred import OPTParser, NPParser, Converter
+
+import numpy as np
 
 def force_pred(input_files='input_files'):
 
@@ -20,33 +21,20 @@ def force_pred(input_files='input_files'):
     startTime = datetime.now()
 
     print(startTime)
-
-
-    molecule = OPTParser(input_files)
-    #print(molecule.get_3D_array(molecule.forces))
-    #print(molecule.__dict__)
+    
+    '''
+    molecule = NPParser('types_z', 
+            ['train_asp_coords'], 
+            ['train_asp_forces'])
     print(molecule)
-    print(molecule.energies)
-
-
-    '''          
-    methanal = OPTParser(['../test/methanal_scan.out'])
-    #print(methanal.get_3D_array(methanal.forces))
-    #print(methanal.__dict__)
-    print(methanal)
-    print(methanal.energies)
-
-    #methanal.iterate_files(['../test/ethanediol-scan-test.out'])
-    #print(methanal)
-    #print(methanal.energies)
-
-    ethanediol = OPTParser(['../test/ethanediol-scan-test.out'])
-    #print(ethanediol.__dict__)
-    print(ethanediol)
-    #ethanediol.forces = ethanediol.get_3D_array(ethanediol.forces)
-    #print(ethanediol.forces)
     '''
 
+    molecule = OPTParser(input_files)
+    print(molecule)
+
+    interatomic = Converter(molecule.coords, 
+            molecule.forces, molecule.atoms)
+    print(interatomic)
 
 
     print(datetime.now() - startTime)

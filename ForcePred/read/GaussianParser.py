@@ -5,7 +5,6 @@ This module is for reading in forces, coordinates and energies from
 Gaussian output files. 
 '''
 
-
 from itertools import islice
 import numpy as np
 
@@ -40,11 +39,14 @@ class OPTParser(object):
         self.opt_structures = 0
         self.natoms = None
         self.atoms = []
-        self.input_coords = []
-        self.standard_coords = []
+        self.new_atoms = []
+        self.coords = []
+        self.std_coords = []
         self.energies = []
         self.forces = []
+        self.sorted_i = None
         self.iterate_files(self.filenames)
+        self.sort_by_energy()
 
     def __str__(self):
         return ('\nGaussian files: %s, \natoms: %s, N atoms: %s, ' \
@@ -53,7 +55,7 @@ class OPTParser(object):
                 '\nN forces %s, N energies %s' % 
                 (', '.join(self.filenames), ' '.join(map(str, self.atoms)), 
                 self.natoms, self.structures, self.opt_structures,
-                len(self.input_coords), len(self.standard_coords),
+                len(self.coords), len(self.std_coords),
                 len(self.forces), len(self.energies)))
           
     def iterate_files(self, filenames):
@@ -61,7 +63,7 @@ class OPTParser(object):
             input_ = open(filename, 'r')
             inp_coord, std_coord, energy, force = None, None, None, None
             for line in input_:
-                self.natom_count(line)
+                self.get_counts(line)
                 if self.natoms != None:
                     if 'Input orientation:' in line:
                         inp_coord = self.clean(self.extract(4, input_)) 
@@ -74,12 +76,21 @@ class OPTParser(object):
                     #only save info if structure is optimised
                     if 'Optimization completed' in line:
                         self.opt_structures += 1
-                        self.input_coords.append(inp_coord)
-                        self.standard_coords.append(std_coord)
+                        self.coords.append(inp_coord)
+                        self.std_coords.append(std_coord)
                         self.energies.append(energy)
                         self.forces.append(force)
+            if self.atoms == self.new_atoms:
+                self.new_atoms = []
+            else:
+                raise ValueError('Structure %s in file %s is different. '\
+                        'Saved structure is %s - ensure all files contain '\
+                        'this structure.' 
+                        % (self.new_atoms, filename, self.atoms))
 
-    def natom_count(self, line):
+
+
+    def get_counts(self, line):
         if 'NAtoms=' in line:
             self.structures += 1
             if self.natoms == None:
@@ -95,9 +106,29 @@ class OPTParser(object):
             cleaned[i] = atom.strip('\n').split()[-3:]
         #get the list of nuclear charges in a molecule
         if len(self.atoms) == 0:
-            for atom in raw:
-                self.atoms.append(int(atom.strip('\n').split()[1]))
+            self.get_atoms(raw, self.atoms)
+        if len(self.new_atoms) == 0:
+            self.get_atoms(raw, self.new_atoms)
         return cleaned
+
+    def get_atoms(self, raw, atoms):
+        for atom in raw:
+            atoms.append(int(atom.strip('\n').split()[1]))
+
+    def sort_by_energy(self):
+        self.energies = np.array(self.energies)
+        self.sorted_i = np.argsort(self.energies)
+        self.energies = self.energies[self.sorted_i]
+        self.coords = self.order_array(self.coords, 
+                self.sorted_i)
+        self.std_coords = self.order_array(self.std_coords, self.sorted_i)
+        self.forces = self.order_array(self.forces, self.sorted_i)
+        return self
+
+    def order_array(self, np_list, sorted_i):
+        np_list = self.get_3D_array(np_list)
+        np_list = np_list[sorted_i]
+        return np_list
 
     def get_3D_array(self, np_list):
         np_list = np.reshape(np.vstack(np_list), (-1,self.natoms,3))
@@ -105,5 +136,5 @@ class OPTParser(object):
 
     def get_2D_array(self, np_list):
         np_list = np.vstack(np_list)
-        return np_list
+        return np_list        
 
