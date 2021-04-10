@@ -33,7 +33,7 @@ class OPTParser(object):
     ________________________________________________________________
     '''
 
-    def __init__(self, filenames):
+    def __init__(self, filenames, molecule):
         self.filenames = filenames
         self.structures = 0
         self.opt_structures = 0
@@ -42,11 +42,12 @@ class OPTParser(object):
         self.new_atoms = []
         self.coords = []
         self.std_coords = []
-        self.energies = []
         self.forces = []
+        self.energies = []
         self.sorted_i = None
         self.iterate_files(self.filenames)
         self.sort_by_energy()
+        molecule.get_ZCFE(self) #populate molecule class
 
     def __str__(self):
         return ('\nGaussian files: %s, \natoms: %s, N atoms: %s, ' \
@@ -61,7 +62,7 @@ class OPTParser(object):
     def iterate_files(self, filenames):
         for filename in filenames:
             input_ = open(filename, 'r')
-            inp_coord, std_coord, energy, force = None, None, None, None
+            inp_coord, std_coord, force, energy = None, None, None, None
             for line in input_:
                 self.get_counts(line)
                 if self.natoms != None:
@@ -78,8 +79,8 @@ class OPTParser(object):
                         self.opt_structures += 1
                         self.coords.append(inp_coord)
                         self.std_coords.append(std_coord)
-                        self.energies.append(energy)
                         self.forces.append(force)
+                        self.energies.append(energy)
             if self.atoms == self.new_atoms:
                 self.new_atoms = []
             else:
@@ -87,8 +88,6 @@ class OPTParser(object):
                         'Saved structure is %s - ensure all files contain '\
                         'this structure.' 
                         % (self.new_atoms, filename, self.atoms))
-
-
 
     def get_counts(self, line):
         if 'NAtoms=' in line:

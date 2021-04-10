@@ -12,10 +12,11 @@ class NPParser(object):
     '''
     '''
 
-    def __init__(self, file_atoms, files_coords, files_forces):
+    def __init__(self, file_atoms, files_coords, files_forces, molecule):
         self.file_atoms = file_atoms
         self.files_coords = files_coords
         self.files_forces = files_forces
+        self.filenames = [file_atoms, files_coords, files_forces]
         self.atoms = []
         self.energies = []
         self.coords = []
@@ -24,12 +25,12 @@ class NPParser(object):
         self.iterate_atoms_file(file_atoms)
         self.coords = self.iterate_files(files_coords, self.coords)
         self.forces = self.iterate_files(files_forces, self.forces)
+        molecule.get_ZCFE(self) #populate molecule class
 
     def __str__(self):
-        return ('\nnumpy files: %s, %s, %s, \natoms: %s, N atoms: %s, ' \
+        return ('\nnumpy files: %s, \natoms: %s, N atoms: %s, ' \
                 '\nN structures: %s' % 
-                (self.file_atoms, ', '.join(self.files_coords),
-                ', '.join(self.files_forces),
+                (self.filenames,
                 ' '.join(map(str, self.atoms)), 
                 len(self.atoms), len(self.coords)))
 

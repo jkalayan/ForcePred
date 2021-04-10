@@ -10,7 +10,8 @@ import numpy as np
 
 class Converter(object):
     '''
-    Takes coords, forces and converts into desired format
+    Takes coords, forces, atoms from Molecule class 
+    and converts into desired format
     e.g. interatomic foces, nuclear repulsive forces,
     '''
 
@@ -18,18 +19,19 @@ class Converter(object):
     au2Ang=0.529177 #bohr to Angstrom
     Eh2kJmol=627.5095*4.184 #hartree to kJ/mol
     au2kJmola=Eh2kJmol*au2Ang #convert from Eh/a_0 to kJ/(mol Ang)
-
-    
-    def __init__(self, coords, forces, atoms):
-        self.coords = coords
-        self.forces = forces
-        self.atoms = atoms
+ 
+    def __init__(self, molecule):
+        molecule.check_force_conservation()
+        self.coords = molecule.coords
+        self.forces = molecule.forces
+        self.atoms = molecule.atoms
         self.mat_r = None
         self.mat_NRE = None
         self.get_interatomic_forces()
 
+
     def __str__(self):
-        return ('\nN structures: %s, ' % (len(self.coords)))
+        return ('\nN structures: %s,' % (len(self.coords)))
 
     def get_interatomic_forces(self):
         if len(self.atoms) == len(self.coords[0]):
@@ -40,11 +42,11 @@ class Converter(object):
             self.mat_NRF = np.zeros((n_structures, n_atoms, n_atoms))
             mat_vals = np.zeros((n_structures, n_atoms, 3, _NC2))
             mat_F = [] 
-            for s in range(0, n_structures):
+            for s in range(n_structures):
                 _N = -1
-                for i in range(0, n_atoms):
+                for i in range(n_atoms):
                     zi = self.atoms[i]
-                    for j in range(0, i):
+                    for j in range(i):
                         _N += 1
                         zj = self.atoms[j]
                         r = self.get_r(self.coords[s][i], self.coords[s][j])
@@ -77,6 +79,7 @@ class Converter(object):
 
     def get_r(self, coordsA, coordsB):
         return np.linalg.norm(coordsA-coordsB)
+
 
 
 
