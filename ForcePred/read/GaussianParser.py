@@ -7,7 +7,7 @@ Gaussian output files.
 
 from itertools import islice
 import numpy as np
-
+from ..calculate.Converter import Converter
 
 class OPTParser(object):
     '''
@@ -46,7 +46,6 @@ class OPTParser(object):
         self.energies = []
         self.sorted_i = None
         self.iterate_files(self.filenames)
-        self.sort_by_energy()
         molecule.get_ZCFE(self) #populate molecule class
 
     def __str__(self):
@@ -67,13 +66,17 @@ class OPTParser(object):
                 self.get_counts(line)
                 if self.natoms != None:
                     if 'Input orientation:' in line:
-                        inp_coord = self.clean(self.extract(4, input_)) 
+                        inp_coord = self.clean(self.extract(4, input_)) #\
+                                #* Converter.au2Ang
                     if 'Standard orientation:' in line:
-                        std_coord = self.clean(self.extract(4, input_))
+                        std_coord = self.clean(self.extract(4, input_)) #\
+                                #* Converter.au2Ang
                     if 'SCF Done:' in line:
-                        energy = float(line.split()[4])
+                        energy = float(line.split()[4]) \
+                                * Converter.Eh2kcalmol
                     if 'Axes restored to original set' in line:
-                        force = self.clean(self.extract(4, input_))
+                        force = self.clean(self.extract(4, input_)) \
+                                * Converter.au2kcalmola
                     #only save info if structure is optimised
                     if 'Optimization completed' in line:
                         self.opt_structures += 1
@@ -108,32 +111,12 @@ class OPTParser(object):
             self.get_atoms(raw, self.atoms)
         if len(self.new_atoms) == 0:
             self.get_atoms(raw, self.new_atoms)
-        return cleaned
+        #print(cleaned.shape)
+        return np.array(cleaned)
 
     def get_atoms(self, raw, atoms):
         for atom in raw:
             atoms.append(int(atom.strip('\n').split()[1]))
 
-    def sort_by_energy(self):
-        self.energies = np.array(self.energies)
-        self.sorted_i = np.argsort(self.energies)
-        self.energies = self.energies[self.sorted_i]
-        self.coords = self.order_array(self.coords, 
-                self.sorted_i)
-        self.std_coords = self.order_array(self.std_coords, self.sorted_i)
-        self.forces = self.order_array(self.forces, self.sorted_i)
-        return self
-
-    def order_array(self, np_list, sorted_i):
-        np_list = self.get_3D_array(np_list)
-        np_list = np_list[sorted_i]
-        return np_list
-
-    def get_3D_array(self, np_list):
-        np_list = np.reshape(np.vstack(np_list), (-1,self.natoms,3))
-        return np_list
-
-    def get_2D_array(self, np_list):
-        np_list = np.vstack(np_list)
-        return np_list        
+     
 
