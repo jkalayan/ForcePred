@@ -56,29 +56,34 @@ class AMBLAMMPSParser(object):
         topology = Universe(self.amb_top, self.amb_coords, format='TRJ')
         self.atoms = [Z_[tp.name[0]] for tp in topology.atoms]
 
-        coords = Universe(self.amb_top, self.lammps_coords, 
+        read_coords = Universe(self.amb_top, self.lammps_coords, 
                 atom_style='id type x y z', format='LAMMPSDUMP')
-        forces = Universe(self.amb_top, self.lammps_forces, 
+        read_forces = Universe(self.amb_top, self.lammps_forces, 
                 atom_style='id type x y z', format='LAMMPSDUMP')
-        energies = Universe(self.amb_top, self.lammps_ens, 
+        read_energies = Universe(self.amb_top, self.lammps_ens, 
                 atom_style='id type x y z', format='LAMMPSDUMP') 
                 #new file type, where x=PE, y=KE
 
-        n_atoms = len(coords.trajectory)
-        for f in range(len(coords.trajectory)):
-            t = coords.trajectory[f]
-            self.dimensions.append(np.array(t.dimensions[0:3]))
-
+        n_atoms = len(read_coords.trajectory)
+        for c, f, e in zip(read_coords.trajectory, read_forces.trajectory, 
+                read_energies.trajectory):
+            self.dimensions.append(np.array(c.dimensions[0:3]))
+            self.coords.append(np.array(c.positions))
+            self.forces.append(np.array(f.positions))
+            self.energies.append(np.array(e.positions))
+        
         self.dimensions = self.get_2D_array(self.dimensions)
-        self.coords = (self.get_3D_array(coords.trajectory, 
+
+        self.coords = (self.get_3D_array(self.coords, 
                 len(self.dimensions)) /  self.dimensions[:, None]) #/ \
                 #Converter.au2Ang
-        self.forces = (self.get_3D_array(forces.trajectory, 
+        self.forces = (self.get_3D_array(self.forces, 
                 len(self.dimensions)) /  self.dimensions[:, None]) #/ \
                 #Converter.au2kcalmola
-        atom_energies = (self.get_3D_array(energies.trajectory, 
+        atom_energies = (self.get_3D_array(self.energies, 
                 len(self.dimensions)) /  self.dimensions[:, None]) #/ \
                 #Converter.Eh2kcalmol
+
         self.atom_potentials = \
                 atom_energies.reshape((-1,3))[:,0].reshape(n_atoms,-1)
         self.atom_kinetics = \

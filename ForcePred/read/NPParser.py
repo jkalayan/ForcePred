@@ -18,7 +18,7 @@ class NPParser(object):
         self.files_forces = files_forces
         self.filenames = [file_atoms, files_coords, files_forces]
         self.atoms = []
-        self.energies = []
+        #self.energies = []
         self.coords = []
         self.forces = []
         self.sorted_i = None

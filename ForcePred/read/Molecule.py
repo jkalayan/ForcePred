@@ -14,6 +14,7 @@ This module is used to store information required to predict forces:
 
 import numpy as np
 from ..calculate.Plotter import Plotter
+from ..calculate.Converter import Converter
 import sys
 
 class Molecule(object):
@@ -40,30 +41,39 @@ class Molecule(object):
         rotationally sum to zero (energy is conserved) i.e. translations
         and rotations are invariant. '''
         unconserved = []
+        translations = []
+        rotations = []
         for s in range(len(self.forces)):
             cm = np.average(self.coords[s], axis=0)
+            #masses = np.array([Converter._ZM[a] for a in self.atoms])
+            #cm = Converter.get_com(self.coords[s], masses)
             for x in range(3):
                 #translations
-                x_trans_sum = abs(round(np.sum(self.forces[s],axis=0)[x], 1))
+                x_trans_sum = np.sum(self.forces[s],axis=0)[x]
                 #print(x_trans_sum)
+                x_trans_sum = abs(round(x_trans_sum, 1))
                 if abs(x_trans_sum) != 0 and s not in unconserved:
                     unconserved.append(s)
+                    translations.append(x_trans_sum)
             #rotations
             i_rot_sum = np.zeros((3))
             for i in range(len(self.forces[s])):
                 r = self.coords[s][i] - cm
                 diff = np.cross(r, self.forces[s][i])
                 i_rot_sum = np.add(i_rot_sum, diff)
-            i_rot_sum = np.round(np.abs(i_rot_sum), 1)
             #print(i_rot_sum)
+            i_rot_sum = np.round(np.abs(i_rot_sum), 1)
             if np.all(i_rot_sum != 0) and s not in unconserved:
                 unconserved.append(s)
+                rotations.append(i_rot_sum)
         if len(unconserved) != 0:
             print('Warning: structures %s are variant, '\
-                    'removing from dataset shaped %s.' % 
+                    'from dataset shaped %s.' % 
                     (unconserved, self.coords.shape))
-            Molecule.remove_variants(self, unconserved)
-            print('New dataset shape is', self.coords.shape)
+            print('translations {}'.format(translations))
+            print('rotations {}'.format(rotations))
+            #Molecule.remove_variants(self, unconserved)
+            #print('New dataset shape is', self.coords.shape)
 
     def remove_variants(self, unconserved):
         for s in unconserved:

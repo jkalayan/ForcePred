@@ -19,6 +19,7 @@ from ForcePred import Molecule, OPTParser, NPParser, Converter, \
 import sys
 #import numpy as np
 
+
 def run_force_pred(input_files='input_files'):
 
 
@@ -27,29 +28,75 @@ def run_force_pred(input_files='input_files'):
     print(startTime)
     
     molecule = Molecule() #initiate molecule class
-    OPTParser(input_files, molecule) #read in FCEZ
+    #OPTParser(input_files, molecule) #read in FCEZ
+    '''
+    AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd', 
+            ['Trajectory_npt_1.data'], 
+            ['Forces_npt_1.data'], 
+            ['Energy_npt_1.data'], molecule)
+    '''
+    '''
+    NPParser('types_z', 
+            ['train_1frame_aspirin_coords'], 
+            ['train_1frame_aspirin_forces'], molecule)
+    '''
+    #'''
+    NPParser('types_z', 
+            ['train50000_aspirin_coordinates'], 
+            ['train50000_aspirin_forces'], molecule)
+    #'''
+    '''
+    AMBERParser('molecules.prmtop', '1md.mdcrd', 'ascii.frc', 
+            molecule)
+    '''
     Molecule.check_force_conservation(molecule) #
-    Converter(molecule) #check forces are invariant and get pairwise forces
-    Molecule.make_train_test(molecule, molecule.energies) 
-        #get train and test sets
-    network = Network() #initiate network class
-    Network.get_variable_depth_model(network, molecule) #train NN
-    nsteps=5000
-    mm = Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
-    coords, forces = [], []
-    for i in range(len(mm.forces)):
-        if i%(nsteps/100) == 0:
-            coords.append(mm.coords[i])
-            forces.append(mm.forces[i])
-    Writer.write_xyz(coords, molecule.atoms, 
-        'nn-coords.xyz')
-    Writer.write_xyz(forces, molecule.atoms, 
-        'nn-forces.xyz')
+    Converter(molecule) #get pairwise forces
+    print(molecule)
 
-    Writer.write_xyz([molecule.coords[0]], molecule.atoms, 
-        'coords.xyz')
-    Writer.write_xyz([molecule.forces[0]], molecule.atoms, 
-        'forces.xyz')
+    Writer.write_xyz(molecule.coords, molecule.atoms, 'coords.xyz')
+    Writer.write_xyz(molecule.forces, molecule.atoms, 'forces.xyz')
+
+    #'''
+    Converter.get_rotated_forces(molecule)
+    molecule.forces = molecule.rotated_forces
+    molecule.coords = molecule.rotated_coords
+    Molecule.check_force_conservation(molecule) #
+    Converter(molecule) # get pairwise forces
+
+    Writer.write_xyz(molecule.rotated_coords, 
+            molecule.atoms, 'rot_coords.xyz')
+    Writer.write_xyz(molecule.rotated_forces, 
+            molecule.atoms, 'rot_forces.xyz')
+    #'''
+
+    for i in range(5):
+        n_atoms = len(molecule.atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        recomp = Network.get_recomposed_forces(molecule.coords[i], 
+                molecule.mat_F[i].reshape(1,-1), n_atoms, _NC2)
+        #print(molecule.mat_F[0].shape)
+        print(molecule.forces[i], '\n')
+        print(recomp,'\n')
+        print()
+
+    run_net = True
+    if run_net:
+        Molecule.make_train_test(molecule, molecule.energies) 
+            #get train and test sets
+        network = Network() #initiate network class
+        Network.get_variable_depth_model(network, molecule) #train NN
+        nsteps=5000
+        mm = Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
+        coords, forces = [], []
+        for i in range(len(mm.forces)):
+            if i%(nsteps/100) == 0:
+                coords.append(mm.coords[i])
+                forces.append(mm.forces[i])
+        Writer.write_xyz(coords, molecule.atoms, 
+            'nn-coords.xyz')
+        Writer.write_xyz(forces, molecule.atoms, 
+            'nn-forces.xyz')
+
 
     '''
     NPParser('types_z', 

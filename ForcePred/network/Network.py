@@ -90,7 +90,7 @@ class Network(object):
         eij = np.zeros((3, n_atoms, n_atoms))
             #normalised interatomic vectors
         q_list = []
-        for i in range(n_atoms):
+        for i in range(1,n_atoms):
             for j in range(i):
                 rij[:,i,j] = (coords[i,:] - coords[j,:])
                 rij[:,j,i] = -rij[:,i,j]
@@ -133,8 +133,15 @@ class Network(object):
             mat_NRF_scaled = mat_NRF / scale_NRF
             prediction_scaled = model.predict(mat_NRF_scaled)
             prediction = (prediction_scaled - 0.5) * scale_F
+            #print(prediction)
+            #print(prediction.shape)
             recomp_forces = Network.get_recomposed_forces(coords_current, 
                     prediction, n_atoms, _NC2)
+            #print(recomp_forces)
+            #print(recomp_forces.shape)
+            #print(molecule.forces[0])
+            #print(molecule.forces[0].shape)
+            #print()
             mm.forces.append(recomp_forces)
             coords_prev = mm.coords[i]
             if i != 0:

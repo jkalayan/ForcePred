@@ -40,16 +40,21 @@ class AMBERParser(object):
 
     def read_files(self):
         Z_ = {'H':1, 'C':6, 'O':8}
-        coords = Universe(self.amb_top, self.amb_coords, format='TRJ')
-        forces = Universe(self.amb_top, self.amb_forces, format='TRJ')
-        self.atoms = [Z_[tp.name[0]] for tp in coords.atoms]
+        read_coords = Universe(self.amb_top, self.amb_coords, format='TRJ')
+        read_forces = Universe(self.amb_top, self.amb_forces, format='TRJ')
+        self.atoms = [Z_[tp.name[0]] for tp in read_coords.atoms]
 
-        n_atoms = len(coords.trajectory)
+        for c, f in zip(read_coords.trajectory, read_forces.trajectory):
+            self.coords.append(np.array(c.positions))
+            self.forces.append(np.array(f.positions))
+        
+
+        n_atoms = len(read_coords.trajectory)
         #print(self.atoms, n_atoms, len(forces.trajectory))
 
-        self.coords = self.get_3D_array(coords.trajectory, n_atoms) #/ \
+        self.coords = self.get_3D_array(self.coords, n_atoms) #/ \
                 #Converter.au2Ang
-        self.forces = self.get_3D_array(forces.trajectory, n_atoms) #/ \
+        self.forces = self.get_3D_array(self.forces, n_atoms) #/ \
                 #Converter.au2kcalmola
 
     def get_3D_array(self, np_list, n_structures):
