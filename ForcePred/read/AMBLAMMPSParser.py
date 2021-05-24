@@ -28,6 +28,7 @@ class AMBLAMMPSParser(object):
         self.filenames = [amb_top, amb_coords, lammps_coords, 
                 lammps_forces, lammps_ens]
         self.atoms = []
+        self.n_all_atoms = 0
         self.coords = []
         self.forces = []
         self.energies = []
@@ -56,22 +57,25 @@ class AMBLAMMPSParser(object):
         topology = Universe(self.amb_top, self.amb_coords, format='TRJ')
         self.atoms = [Z_[tp.name[0]] for tp in topology.atoms]
 
-        read_coords = Universe(self.amb_top, self.lammps_coords, 
-                atom_style='id type x y z', format='LAMMPSDUMP')
-        read_forces = Universe(self.amb_top, self.lammps_forces, 
-                atom_style='id type x y z', format='LAMMPSDUMP')
-        read_energies = Universe(self.amb_top, self.lammps_ens, 
-                atom_style='id type x y z', format='LAMMPSDUMP') 
-                #new file type, where x=PE, y=KE
+        for _C, _F, _E in zip(self.lammps_coords, self.lammps_forces, 
+                self.lammps_ens):
+            read_coords = Universe(self.amb_top, _C, 
+                    atom_style='id type x y z', format='LAMMPSDUMP')
+            read_forces = Universe(self.amb_top, _F, 
+                    atom_style='id type x y z', format='LAMMPSDUMP')
+            read_energies = Universe(self.amb_top, _E, 
+                    atom_style='id type x y z', format='LAMMPSDUMP') 
+                    #new file type, where x=PE, y=KE
 
-        n_atoms = len(read_coords.trajectory)
-        for c, f, e in zip(read_coords.trajectory, read_forces.trajectory, 
-                read_energies.trajectory):
-            self.dimensions.append(np.array(c.dimensions[0:3]))
-            self.coords.append(np.array(c.positions))
-            self.forces.append(np.array(f.positions))
-            self.energies.append(np.array(e.positions))
-        
+            self.n_all_atoms += len(read_coords.trajectory)
+            n_atoms = self.n_all_atoms
+            for c, f, e in zip(read_coords.trajectory, read_forces.trajectory, 
+                    read_energies.trajectory):
+                self.dimensions.append(np.array(c.dimensions[0:3]))
+                self.coords.append(np.array(c.positions))
+                self.forces.append(np.array(f.positions))
+                self.energies.append(np.array(e.positions))
+            
         self.dimensions = self.get_2D_array(self.dimensions)
 
         self.coords = (self.get_3D_array(self.coords, 

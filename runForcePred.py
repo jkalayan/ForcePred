@@ -30,13 +30,17 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
     startTime = datetime.now()
 
     print(startTime)
-    
     molecule = Molecule() #initiate molecule class
     #OPTParser(input_files, molecule, opt=False) #read in FCEZ
     #'''
-    AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd', 
-            coord_files, force_files, energy_files, molecule)
+    AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd',
+        coord_files, force_files, energy_files, molecule)
     #'''
+    '''
+    for c, f, e in zip(coord_files, force_files, energy_files):
+        AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd', 
+                c, f, e, molecule)
+    '''
     '''
     NPParser('types_z', 
             ['train_1frame_aspirin_coords'], 
