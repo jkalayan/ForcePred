@@ -28,6 +28,7 @@ class Converter(object):
     _NA = 6.02214076e23
     au2kg = 1.66053907e-27
     _ZM = {1:1.008, 6:12.011, 8:15.999}
+    _ZSymbol = {1:'H', 6:'C', 8:'O'}
  
     def __init__(self, molecule):
         #molecule.check_force_conservation()

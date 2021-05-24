@@ -69,3 +69,28 @@ class Plotter(object):
                 bbox_inches='tight'
                 )
         plt.close(plt.gcf())
+
+    def hist_2d(x, y, xlabel, ylabel, plot_name):
+        fig, ax = plt.subplots(figsize=(10, 10), 
+                edgecolor='k') #all in one plot
+        x_min, x_max = np.min(x), np.max(x)
+        x_diff = int(x_max-x_min)
+        y_min, y_max = np.min(y), np.max(y)
+        y_diff = int(y_max-y_min)
+        sc = ax.hist2d(x=x, y=y, bins=[x_diff, y_diff], 
+                range=[[x_min, x_max], [y_min, y_max]], 
+                alpha=1, 
+                #marker='s', 
+                #s=17, edgecolor='k', linewidth=0.1,
+                #cmap=plt.cm.get_cmap('copper_r', 500),
+                #cmap=plt.cm.get_cmap('gist_heat_r', 500),
+                #cmap=plt.cm.get_cmap('jet', 500),
+                cmap=plt.cm.get_cmap('binary', 500),
+                #vmin=cm_min, vmax=cm_max
+                )
+        Plotter.format(ax, x, y, xlabel, ylabel)
+        fig.savefig('%s' % (plot_name), 
+                transparent=True, 
+                bbox_inches='tight'
+                )
+        plt.close(plt.gcf())

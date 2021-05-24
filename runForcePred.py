@@ -13,14 +13,18 @@ import argparse
 import numpy as np
 
 from ForcePred import Molecule, OPTParser, NPParser, Converter, \
-        Permuter, AMBLAMMPSParser, AMBERParser, Binner, Writer, Plotter, \
-        Network
+        Permuter, AMBLAMMPSParser, AMBERParser, Binner, Writer, Plotter#, \
+        #Network
 
 import sys
 #import numpy as np
 
+#import os
+#os.environ['OMP_NUM_THREADS'] = '8'
 
-def run_force_pred(input_files='input_files'):
+
+def run_force_pred(input_files='input_files', coord_files='coord_files',
+        force_files='force_files', energy_files='energy_files'):
 
 
     startTime = datetime.now()
@@ -28,23 +32,21 @@ def run_force_pred(input_files='input_files'):
     print(startTime)
     
     molecule = Molecule() #initiate molecule class
-    #OPTParser(input_files, molecule) #read in FCEZ
-    '''
+    #OPTParser(input_files, molecule, opt=False) #read in FCEZ
+    #'''
     AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd', 
-            ['Trajectory_npt_1.data'], 
-            ['Forces_npt_1.data'], 
-            ['Energy_npt_1.data'], molecule)
-    '''
+            coord_files, force_files, energy_files, molecule)
+    #'''
     '''
     NPParser('types_z', 
             ['train_1frame_aspirin_coords'], 
             ['train_1frame_aspirin_forces'], molecule)
     '''
-    #'''
+    '''
     NPParser('types_z', 
             ['train50000_aspirin_coordinates'], 
             ['train50000_aspirin_forces'], molecule)
-    #'''
+    '''
     '''
     AMBERParser('molecules.prmtop', '1md.mdcrd', 'ascii.frc', 
             molecule)
@@ -69,6 +71,11 @@ def run_force_pred(input_files='input_files'):
             molecule.atoms, 'rot_forces.xyz')
     #'''
 
+
+    #Writer.write_gaus_cart(molecule.coords[0:3], 
+            #molecule.atoms, 'SP Force', 'test-ethanediolSP')
+
+    '''
     for i in range(5):
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
@@ -96,6 +103,7 @@ def run_force_pred(input_files='input_files'):
             'nn-coords.xyz')
         Writer.write_xyz(forces, molecule.atoms, 
             'nn-forces.xyz')
+    '''
 
 
     '''
@@ -136,7 +144,7 @@ def run_force_pred(input_files='input_files'):
     angles.get_angle_pop(molecule, list_angles)
     '''
 
-    '''
+    #'''
     dihedrals = Binner()
     list_dih = [[1, 2, 3, 6], [3, 2, 1, 7],
             [2, 1, 7, 10]]
@@ -145,16 +153,22 @@ def run_force_pred(input_files='input_files'):
     phis_1 = [i[0] for i in molecule.phis]
     phis_2 = [i[1] for i in molecule.phis]
     phis_3 = [i[2] for i in molecule.phis]
-    _Es = molecule.energies
-    train, test = Molecule.make_train_test(molecule, _Es)
+    #_Es = molecule.energies
+    #train, test = Molecule.make_train_test(molecule, _Es)
+    #train = np.array(range(len(molecule.cooords)))
 
-    Plotter.xyz_scatter(np.take(phis_1, train), np.take(phis_2, train), 
-            np.take(_Es, train), 
-            '$\phi_1$', '$\phi_2$', '$U$', 'train-12c')
-    Plotter.xyz_scatter(np.take(phis_1, test), np.take(phis_2, test), 
-            np.take(_Es, test), 
-            '$\phi_1$', '$\phi_2$', '$U$', 'test-12')
+    #Plotter.xyz_scatter(np.take(phis_1, train), np.take(phis_2, train), 
+            #np.take(_Es, train), 
+            #'$\phi_1$', '$\phi_2$', '$U$', 'train-12c')
+    #Plotter.xyz_scatter(np.take(phis_1, test), np.take(phis_2, test), 
+            #np.take(_Es, test), 
+            #'$\phi_1$', '$\phi_2$', '$U$', 'test-12')
+
+    Plotter.hist_2d(phis_1, phis_2, '$\phi_1$', '$\phi_2$', 
+            'dih_binned')
     #'''
+
+
 
     #Molecule.make_train_test(molecule, molecule.energies)
     #network = Network()
@@ -178,6 +192,15 @@ def main():
                 metavar='file', default=[],
                 help='name of file/s containing forces '\
                 'coordinates and energies.')
+        group = parser.add_argument('-c', '--coord_files', nargs='+', 
+                metavar='file', default=[],
+                help='name of file/s containing coordinates.')
+        group = parser.add_argument('-f', '--force_files', nargs='+', 
+                metavar='file', default=[],
+                help='name of file/s containing forces.')
+        group = parser.add_argument('-e', '--energy_files', nargs='+', 
+                metavar='file', default=[],
+                help='name of file/s containing energies.')
         op = parser.parse_args()
     except argparse.ArgumentError:
         logging.error('Command line arguments are ill-defined, '
@@ -185,7 +208,8 @@ def main():
         raise
         sys.exit(1)
 
-    run_force_pred(input_files=op.input_files)
+    run_force_pred(input_files=op.input_files, coord_files=op.coord_files, 
+            force_files=op.force_files, energy_files=op.energy_files)
 
 if __name__ == '__main__':
     main()

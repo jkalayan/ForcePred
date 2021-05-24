@@ -8,6 +8,7 @@ Gaussian output files.
 from itertools import islice
 import numpy as np
 from ..calculate.Converter import Converter
+import sys
 
 class OPTParser(object):
     '''
@@ -33,7 +34,7 @@ class OPTParser(object):
     ________________________________________________________________
     '''
 
-    def __init__(self, filenames, molecule):
+    def __init__(self, filenames, molecule, opt=True):
         self.filenames = filenames
         self.structures = 0
         self.opt_structures = 0
@@ -45,7 +46,7 @@ class OPTParser(object):
         self.forces = []
         self.energies = []
         self.sorted_i = None
-        self.iterate_files(self.filenames)
+        self.iterate_files(self.filenames, opt)
         molecule.get_ZCFE(self) #populate molecule class
 
     def __str__(self):
@@ -58,12 +59,13 @@ class OPTParser(object):
                 len(self.coords), len(self.std_coords),
                 len(self.forces), len(self.energies)))
           
-    def iterate_files(self, filenames):
+    def iterate_files(self, filenames, opt):
         for filename in filenames:
             input_ = open(filename, 'r')
             inp_coord, std_coord, force, energy = None, None, None, None
             for line in input_:
-                self.get_counts(line)
+                #self.get_counts(line)
+                self.get_counts2(line, input_)
                 if self.natoms != None:
                     if 'Input orientation:' in line:
                         inp_coord = self.clean(self.extract(4, input_)) #\
@@ -78,7 +80,12 @@ class OPTParser(object):
                         force = self.clean(self.extract(4, input_)) \
                                 * Converter.au2kcalmola
                     #only save info if structure is optimised
-                    if 'Optimization completed' in line:
+                    save_data = False
+                    if opt and 'Optimization completed' in line:
+                        save_data = True
+                    if opt == False and 'Normal termination' in line:
+                        save_data = True
+                    if save_data:
                         self.opt_structures += 1
                         self.coords.append(inp_coord)
                         self.std_coords.append(std_coord)
@@ -97,6 +104,22 @@ class OPTParser(object):
             self.structures += 1
             if self.natoms == None:
                 self.natoms = int(line.split()[1])
+
+    def get_counts2(self, line, input_):
+        '''find atom count by counting num atoms after Z-matrix print'''
+        if 'Symbolic Z-matrix:' in line:
+            self.structures += 1
+            atom_count = 0
+            input_.readline() #ignore this line
+            for line in input_:
+                line2 = line.strip('\n').split()
+                if len(line2) > 0:
+                    atom = line2[0]
+                    if len(atom) < 3 and len(atom) > 0: #atom symbols only
+                        atom_count += 1
+                    else:
+                        break
+            self.natoms = atom_count
 
     def extract(self, padding, input_):
         return (list(islice(input_, padding + 
