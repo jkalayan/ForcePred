@@ -76,7 +76,7 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
     #Writer.write_gaus_cart(molecule.coords[0:3], 
             #molecule.atoms, 'SP Force', 'ethanediolSP')
 
-    #'''
+    '''
     for i in range(5):
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
@@ -86,7 +86,11 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
         print(molecule.forces[i], '\n')
         print(recomp,'\n')
         print()
+    '''
 
+    sys.stdout.flush()
+
+    #'''
     run_net = True
     if run_net:
         #Molecule.make_train_test(molecule, molecule.energies) 
@@ -95,15 +99,6 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
         #Network.get_variable_depth_model(network, molecule) #train NN
         nsteps=6000000
         Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
-        #coords, forces = [], []
-        #for i in range(len(mm.forces)):
-            #if i%(nsteps/100) == 0:
-                #coords.append(mm.coords[i])
-                #forces.append(mm.forces[i])
-        #Writer.write_xyz(coords, molecule.atoms, 
-            #'nn-coords.xyz', 'w')
-        #Writer.write_xyz(forces, molecule.atoms, 
-            #'nn-forces.xyz', 'w')
 
     #'''
 

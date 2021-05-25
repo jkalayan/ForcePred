@@ -13,6 +13,7 @@ import tensorflow as tf
 from ..calculate.MM import MM
 from ..calculate.Converter import Converter
 from ..write.Writer import Writer
+from ..read.Molecule import Molecule
 #import sys
 
 class Network(object):
@@ -114,12 +115,14 @@ class Network(object):
 
     def run_NVE(network, molecule, timestep, nsteps):
         #mm = MM() #initiate MM class
+        mm = Molecule()
+        mm.atoms = molecule.atoms
         coords_init = molecule.coords[0]
         atoms = molecule.atoms
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
-        scale_NRF = 27942.731497548113 #network.scale_NRF #
-        scale_F = 0.06989962601741863 #network.scale_F #
+        scale_NRF = 13036.561501577185 #network.scale_NRF #
+        scale_F = 547.4610197022887 #network.scale_F #
         #mm.coords.append(coords_init)
         masses = np.zeros((n_atoms,3))
         for i in range(n_atoms):
@@ -131,7 +134,6 @@ class Network(object):
         coords_prev = coords_init
         coords_current = coords_init
         for i in range(nsteps):
-            #coords_current = mm.coords[i]
             mat_NRF = Network.get_NRF_input(coords_current, atoms, 
                     n_atoms, _NC2)
             mat_NRF_scaled = mat_NRF / scale_NRF
@@ -139,26 +141,27 @@ class Network(object):
             prediction = (prediction_scaled - 0.5) * scale_F
             recomp_forces = Network.get_recomposed_forces(coords_current, 
                     prediction, n_atoms, _NC2)
-            #mm.forces.append(recomp_forces)
-            #coords_prev = mm.coords[i]
-            #if i != 0:
-                #coords_prev = mm.coords[i-1]
+
+            mm.coords = mm.get_3D_array([coords_current])
+            mm.forces = mm.get_3D_array([recomp_forces])
+            mm.check_force_conservation()
+            Converter.get_rotated_forces(mm)
+
+            coords_current = mm.rotated_coords[0]
+            recomp_forces = mm.rotated_forces[0]
+
             coords_next = MM.calculate_verlet_step(coords_current, 
                     coords_prev, recomp_forces, masses, timestep)
-            #mm.coords.append(coords_next)
+
             if i%(nsteps/10000) == 0:
                 Writer.write_xyz([coords_current], molecule.atoms, 
                     'nn-coords.xyz', 'a', i)
                 Writer.write_xyz([recomp_forces], molecule.atoms, 
                     'nn-forces.xyz', 'a', i)
+
             coords_prev = coords_current
             coords_current = coords_next
-        #return mm
 
-
-
-
-                
 
         
 
