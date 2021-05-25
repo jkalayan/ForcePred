@@ -30,7 +30,8 @@ class Writer(object):
         symbols = [Converter._ZSymbol[atom] for atom in atoms] 
         for molecule in range(len(coords)):
             count += 1
-            count_str = '{:06d}'.format(count)
+            #count_str = '{:06d}'.format(count)
+            count_str = count
             filename2 = '{}_{}'.format(filename, count_str)
             gaus_cart_file = open('{}.com'.format(filename2), 'w')
             chkpoint = '%Chk={}.chk'.format(filename2)

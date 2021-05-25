@@ -36,11 +36,7 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
     AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd',
         coord_files, force_files, energy_files, molecule)
     #'''
-    '''
-    for c, f, e in zip(coord_files, force_files, energy_files):
-        AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd', 
-                c, f, e, molecule)
-    '''
+
     '''
     NPParser('types_z', 
             ['train_1frame_aspirin_coords'], 
@@ -77,7 +73,7 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
 
 
     #Writer.write_gaus_cart(molecule.coords[0:3], 
-            #molecule.atoms, 'SP Force', 'test-ethanediolSP')
+            #molecule.atoms, 'SP Force', 'ethanediolSP')
 
     '''
     for i in range(5):
@@ -169,7 +165,11 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
             #'$\phi_1$', '$\phi_2$', '$U$', 'test-12')
 
     Plotter.hist_2d(phis_1, phis_2, '$\phi_1$', '$\phi_2$', 
-            'dih_binned')
+            'dih_binned12')
+    Plotter.hist_2d(phis_1, phis_3, '$\phi_1$', '$\phi_3$', 
+            'dih_binned13')
+    Plotter.hist_2d(phis_2, phis_3, '$\phi_2$', '$\phi_3$', 
+            'dih_binned23')
     #'''
 
 
