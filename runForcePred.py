@@ -13,8 +13,8 @@ import argparse
 import numpy as np
 
 from ForcePred import Molecule, OPTParser, NPParser, Converter, \
-        Permuter, AMBLAMMPSParser, AMBERParser, Binner, Writer, Plotter#, \
-        #Network
+        Permuter, AMBLAMMPSParser, AMBERParser, Binner, Writer, Plotter, \
+        Network
 
 import sys
 #import numpy as np
@@ -31,11 +31,12 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
 
     print(startTime)
     molecule = Molecule() #initiate molecule class
-    #OPTParser(input_files, molecule, opt=False) #read in FCEZ
-    #'''
+    #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
+    OPTParser(input_files, molecule, opt=True) #read in FCEZ for opt
+    '''
     AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd',
         coord_files, force_files, energy_files, molecule)
-    #'''
+    '''
 
     '''
     NPParser('types_z', 
@@ -55,8 +56,8 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
     Converter(molecule) #get pairwise forces
     print(molecule)
 
-    Writer.write_xyz(molecule.coords, molecule.atoms, 'coords.xyz')
-    Writer.write_xyz(molecule.forces, molecule.atoms, 'forces.xyz')
+    Writer.write_xyz(molecule.coords, molecule.atoms, 'coords.xyz', 'w')
+    Writer.write_xyz(molecule.forces, molecule.atoms, 'forces.xyz', 'w')
 
     #'''
     Converter.get_rotated_forces(molecule)
@@ -66,16 +67,16 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
     Converter(molecule) # get pairwise forces
 
     Writer.write_xyz(molecule.rotated_coords, 
-            molecule.atoms, 'rot_coords.xyz')
+            molecule.atoms, 'rot_coords.xyz', 'w')
     Writer.write_xyz(molecule.rotated_forces, 
-            molecule.atoms, 'rot_forces.xyz')
+            molecule.atoms, 'rot_forces.xyz', 'w')
     #'''
 
 
     #Writer.write_gaus_cart(molecule.coords[0:3], 
             #molecule.atoms, 'SP Force', 'ethanediolSP')
 
-    '''
+    #'''
     for i in range(5):
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
@@ -88,22 +89,23 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
 
     run_net = True
     if run_net:
-        Molecule.make_train_test(molecule, molecule.energies) 
+        #Molecule.make_train_test(molecule, molecule.energies) 
             #get train and test sets
         network = Network() #initiate network class
-        Network.get_variable_depth_model(network, molecule) #train NN
-        nsteps=5000
-        mm = Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
-        coords, forces = [], []
-        for i in range(len(mm.forces)):
-            if i%(nsteps/100) == 0:
-                coords.append(mm.coords[i])
-                forces.append(mm.forces[i])
-        Writer.write_xyz(coords, molecule.atoms, 
-            'nn-coords.xyz')
-        Writer.write_xyz(forces, molecule.atoms, 
-            'nn-forces.xyz')
-    '''
+        #Network.get_variable_depth_model(network, molecule) #train NN
+        nsteps=6000000
+        Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
+        #coords, forces = [], []
+        #for i in range(len(mm.forces)):
+            #if i%(nsteps/100) == 0:
+                #coords.append(mm.coords[i])
+                #forces.append(mm.forces[i])
+        #Writer.write_xyz(coords, molecule.atoms, 
+            #'nn-coords.xyz', 'w')
+        #Writer.write_xyz(forces, molecule.atoms, 
+            #'nn-forces.xyz', 'w')
+
+    #'''
 
 
     '''
@@ -144,7 +146,7 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
     angles.get_angle_pop(molecule, list_angles)
     '''
 
-    #'''
+    '''
     dihedrals = Binner()
     list_dih = [[1, 2, 3, 6], [3, 2, 1, 7],
             [2, 1, 7, 10]]
@@ -170,7 +172,7 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
             'dih_binned13')
     Plotter.hist_2d(phis_2, phis_3, '$\phi_2$', '$\phi_3$', 
             'dih_binned23')
-    #'''
+    '''
 
 
 

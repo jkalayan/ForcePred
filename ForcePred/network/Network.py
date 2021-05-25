@@ -12,6 +12,7 @@ from keras import backend as K
 import tensorflow as tf
 from ..calculate.MM import MM
 from ..calculate.Converter import Converter
+from ..write.Writer import Writer
 #import sys
 
 class Network(object):
@@ -112,44 +113,47 @@ class Network(object):
         return recomp_forces
 
     def run_NVE(network, molecule, timestep, nsteps):
-        mm = MM() #initiate MM class
+        #mm = MM() #initiate MM class
         coords_init = molecule.coords[0]
         atoms = molecule.atoms
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
-        scale_NRF = network.scale_NRF #27942.731497548113 #
-        scale_F = network.scale_F #0.06989962601741863 #
-        mm.coords.append(coords_init)
-        #masses = np.array([Converter._ZM[a] for a in atoms])
+        scale_NRF = 27942.731497548113 #network.scale_NRF #
+        scale_F = 0.06989962601741863 #network.scale_F #
+        #mm.coords.append(coords_init)
         masses = np.zeros((n_atoms,3))
         for i in range(n_atoms):
             masses[i,:] = Converter._ZM[atoms[i]]
         #model = network.model
         model = load_model('best_ever_model')
+        open('nn-coords.xyz', 'w').close()
+        open('nn-forces.xyz', 'w').close()
+        coords_prev = coords_init
+        coords_current = coords_init
         for i in range(nsteps):
-            coords_current = mm.coords[i]
+            #coords_current = mm.coords[i]
             mat_NRF = Network.get_NRF_input(coords_current, atoms, 
                     n_atoms, _NC2)
             mat_NRF_scaled = mat_NRF / scale_NRF
             prediction_scaled = model.predict(mat_NRF_scaled)
             prediction = (prediction_scaled - 0.5) * scale_F
-            #print(prediction)
-            #print(prediction.shape)
             recomp_forces = Network.get_recomposed_forces(coords_current, 
                     prediction, n_atoms, _NC2)
-            #print(recomp_forces)
-            #print(recomp_forces.shape)
-            #print(molecule.forces[0])
-            #print(molecule.forces[0].shape)
-            #print()
-            mm.forces.append(recomp_forces)
-            coords_prev = mm.coords[i]
-            if i != 0:
-                coords_prev = mm.coords[i-1]
+            #mm.forces.append(recomp_forces)
+            #coords_prev = mm.coords[i]
+            #if i != 0:
+                #coords_prev = mm.coords[i-1]
             coords_next = MM.calculate_verlet_step(coords_current, 
                     coords_prev, recomp_forces, masses, timestep)
-            mm.coords.append(coords_next)
-        return mm
+            #mm.coords.append(coords_next)
+            if i%(nsteps/10000) == 0:
+                Writer.write_xyz([coords_current], molecule.atoms, 
+                    'nn-coords.xyz', 'a', i)
+                Writer.write_xyz([recomp_forces], molecule.atoms, 
+                    'nn-forces.xyz', 'a', i)
+            coords_prev = coords_current
+            coords_current = coords_next
+        #return mm
 
 
 

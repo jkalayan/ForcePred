@@ -13,10 +13,13 @@ class Writer(object):
     '''
     '''
 
-    def write_xyz(coords, atoms, filename):
-        xyz_file = open(filename, 'w')
+    def write_xyz(coords, atoms, filename, open_type, i=False):
+        xyz_file = open(filename, open_type)
         for molecule in range(len(coords)):
-            xyz_file.write('{}\n{}\n'.format(len(atoms), molecule+1))
+            count = molecule
+            if i:
+                count = i
+            xyz_file.write('{}\n{}\n'.format(len(atoms), count+1))
             for atom in range(len(atoms)):
                 x = coords[molecule][atom][0]
                 y = coords[molecule][atom][1]
