@@ -29,7 +29,9 @@ class MM(object):
         a = _F / m
         v = (_C - _Cprev) / dt + a * dt
         _Cnew = _C + v * dt + a * dt ** 2
-        return _Cnew / Converter.ang2m
+
+        dE = dt * np.sum(forces * (v / Converter.ang2m))
+        return _Cnew / Converter.ang2m, dE
 
 
 

@@ -66,12 +66,19 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
     Molecule.check_force_conservation(molecule) #
     Converter(molecule) # get pairwise forces
 
+    print(np.amax(molecule.mat_NRF), np.amin(molecule.mat_NRF))
+    #sys.exit()
+
     Writer.write_xyz(molecule.rotated_coords, 
             molecule.atoms, 'rot_coords.xyz', 'w')
     Writer.write_xyz(molecule.rotated_forces, 
             molecule.atoms, 'rot_forces.xyz', 'w')
     #'''
 
+    #print(molecule.mat_NRF[0])
+    #Converter.get_coords_from_NRF(molecule.mat_NRF[0]/33, molecule.atoms,
+            #molecule.coords[0], 33)
+    #sys.exit()
 
     #Writer.write_gaus_cart(molecule.coords[0:3], 
             #molecule.atoms, 'SP Force', 'ethanediolSP')
@@ -96,9 +103,9 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
         #Molecule.make_train_test(molecule, molecule.energies) 
             #get train and test sets
         network = Network() #initiate network class
-        #Network.get_variable_depth_model(network, molecule) #train NN
-        nsteps=6000000
-        Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
+        Network.get_variable_depth_model(network, molecule) #train NN
+        nsteps=1000
+        Network.run_NVE(network, molecule, timestep=0.1, nsteps=nsteps)
 
     #'''
 

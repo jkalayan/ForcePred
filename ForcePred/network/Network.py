@@ -14,7 +14,7 @@ from ..calculate.MM import MM
 from ..calculate.Converter import Converter
 from ..write.Writer import Writer
 from ..read.Molecule import Molecule
-#import sys
+import sys
 
 class Network(object):
     '''
@@ -26,14 +26,22 @@ class Network(object):
 
 
     def get_variable_depth_model(self, molecule):
-        _NRF = np.take(molecule.mat_NRF, molecule.train, axis=0)
-        _F = np.take(molecule.mat_F, molecule.train, axis=0)
+        _NRF = molecule.mat_NRF
+        _F = molecule.mat_F
+        train = False
+        if train:
+            _NRF = np.take(molecule.mat_NRF, molecule.train, axis=0)
+            _F = np.take(molecule.mat_F, molecule.train, axis=0)
         #normalise inputs and forces
         self.scale_NRF = np.amax(_NRF)
+        self.scale_NRF_min = np.amin(_NRF)
+        #print(np.amax(_NRF), np.amin(_NRF))
         _NRF = _NRF / self.scale_NRF
         self.scale_F = 2 * np.amax(np.absolute(_F))
         _F = _F / self.scale_F + 0.5
-        print(self.scale_NRF, self.scale_F)
+        print('scale_NRF: {}\nscale_NRF_min: {}\nscale_F: {}\n'\
+                'nstructures: {}'.format(self.scale_NRF, 
+                self.scale_NRF_min, self.scale_F, len(_NRF)))
 
         max_depth = 6
         file_name = 'best_model'
@@ -43,15 +51,17 @@ class Network(object):
         model_in = Input(shape=(_NRF.shape[1],))
         model = model_in
         best_error = 1000
+        n_nodes = 100 #1000
+        n_epochs = 1000 #100000
         for i in range(0, max_depth):
             if i > 0:
                 model = concatenate([model,model_in])
-            net = Dense(units=1000, activation='sigmoid')(model)
+            net = Dense(units=n_nodes, activation='sigmoid')(model)
             net = Dense(units=_NRF.shape[1], activation='sigmoid')(net)         
             model = Model(model_in, net)
             model.compile(loss='mse', optimizer='adam')
             model.summary()
-            model.fit(_NRF, _F, epochs=100000, verbose=2, callbacks=[mc,es])
+            model.fit(_NRF, _F, epochs=n_epochs, verbose=2, callbacks=[mc,es])
             model = load_model(file_name)
             if model.evaluate(_NRF, _F, verbose=0) < best_error:
                 model.save('best_ever_model')
@@ -59,6 +69,7 @@ class Network(object):
                 print('best model was achieved on layer %d' % i)
                 print('its error was:')
                 print(best_error)
+                print()
             #end_training = np.loadtxt('end_file', dtype=int)
             #if end_training == 1:
                 #break
@@ -121,8 +132,12 @@ class Network(object):
         atoms = molecule.atoms
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
-        scale_NRF = 13036.561501577185 #network.scale_NRF #
-        scale_F = 547.4610197022887 #network.scale_F #
+        scale_NRF = 13036.561501577185 #network.scale_NRF # 
+        scale_NRF_min = 0.1 #network.scale_NRF_min
+        scale_F = 547.4610197022887 #network.scale_F # 
+        #print(scale_NRF, scale_NRF_min, scale_F)
+        print('scale_NRF: {}\nscale_NRF_min: {}\nscale_F: {}\n'.format(
+                scale_NRF, scale_NRF_min, scale_F))
         #mm.coords.append(coords_init)
         masses = np.zeros((n_atoms,3))
         for i in range(n_atoms):
@@ -131,17 +146,40 @@ class Network(object):
         model = load_model('best_ever_model')
         open('nn-coords.xyz', 'w').close()
         open('nn-forces.xyz', 'w').close()
+        open('nn-NRF-scaled.txt', 'w').close()
+        open('nn-decomp-force-scaled.txt', 'w').close()
+        open('nn-E.txt', 'w').close()
         coords_prev = coords_init
         coords_current = coords_init
+        _E_prev = 0
         for i in range(nsteps):
+            #print('\t', i)
             mat_NRF = Network.get_NRF_input(coords_current, atoms, 
                     n_atoms, _NC2)
             mat_NRF_scaled = mat_NRF / scale_NRF
+            if np.any((mat_NRF > scale_NRF)) or \
+                    np.any((mat_NRF < scale_NRF_min)):
+                #print(mat_NRF_scaled)
+                #print(mat_NRF)
+                #print()
+                coords_current = Converter.get_coords_from_NRF(
+                        mat_NRF[0], molecule.atoms, 
+                        coords_current, scale_NRF, scale_NRF_min)
+                mat_NRF_scaled = Network.get_NRF_input(coords_current, 
+                        atoms, n_atoms, _NC2) / scale_NRF
+                #print(mat_NRF_scaled)
+
+            open('nn-NRF-scaled.txt', 'a').write(
+                    '{}\n'.format(mat_NRF_scaled))#.close()
             prediction_scaled = model.predict(mat_NRF_scaled)
+            open('nn-decomp-force-scaled.txt', 'a').write(
+                    '{}\n'.format(prediction_scaled))#.close()
+
             prediction = (prediction_scaled - 0.5) * scale_F
             recomp_forces = Network.get_recomposed_forces(coords_current, 
                     prediction, n_atoms, _NC2)
 
+            '''
             mm.coords = mm.get_3D_array([coords_current])
             mm.forces = mm.get_3D_array([recomp_forces])
             mm.check_force_conservation()
@@ -149,18 +187,23 @@ class Network(object):
 
             coords_current = mm.rotated_coords[0]
             recomp_forces = mm.rotated_forces[0]
+            '''
 
-            coords_next = MM.calculate_verlet_step(coords_current, 
+            coords_next, dE = MM.calculate_verlet_step(coords_current, 
                     coords_prev, recomp_forces, masses, timestep)
+            _E = _E_prev - dE
+            open('nn-E.txt', 'a').write('{}\n'.format(_E))#.close()
 
-            if i%(nsteps/10000) == 0:
-                Writer.write_xyz([coords_current], molecule.atoms, 
-                    'nn-coords.xyz', 'a', i)
-                Writer.write_xyz([recomp_forces], molecule.atoms, 
-                    'nn-forces.xyz', 'a', i)
+            #if i%(nsteps/100) == 0:
+            Writer.write_xyz([coords_current], molecule.atoms, 
+                'nn-coords.xyz', 'a', i)
+            Writer.write_xyz([recomp_forces], molecule.atoms, 
+                'nn-forces.xyz', 'a', i)
 
             coords_prev = coords_current
             coords_current = coords_next
+            _E_prev = _E
+            #print()
 
 
         

@@ -95,8 +95,9 @@ class Converter(object):
                     'number of coords.')
 
     def get_NRF(zA, zB, r):
-        return zA * zB * Converter.au2kcalmola / (r ** 2)
-        #return zA * zB / (r ** 2) 
+        #return zA * zB * Converter.au2kcalmola / (r ** 2)
+        return zA * zB / (r ** 2) 
+        #return 1 / (r ** 2) 
 
     def get_r(coordsA, coordsB):
         return np.linalg.norm(coordsA-coordsB)
@@ -266,4 +267,40 @@ class Converter(object):
                 molecule.rotated_forces)
         molecule.rotated_coords = molecule.get_3D_array(
                 molecule.rotated_coords)
+
+    def get_coords_from_NRF(_NRF, atoms, coords, scale, scale_min):
+
+        n_atoms = len(atoms)
+        #print(_NRF)
+        scale_NRF = _NRF / scale
+        scale_min_NRF = _NRF / scale_min
+        r_min = (1 / scale) ** 0.5
+        r_max = (1 / scale_min) ** 0.5
+        #print(scale_NRF)
+        #print(scale_min_NRF)
+        #print(coords)
+        n = -1
+        for i in range(n_atoms-1):
+            for j in range(i+1, n_atoms):
+                r = Converter.get_r(coords[i], coords[j])
+                n += 1
+                #print(i, j, n)
+                #print('\t', r)
+                s = None
+                if scale_NRF[n] > 1:
+                    s = r_min
+                if scale_min_NRF[n] < 1:
+                    s = r_max
+                if s != None:
+                    #print(_NRF[n], s)
+                    coords1 = coords[i]
+                    coords2 = coords[j]
+                    v = coords2 - coords1
+                    new_r = s #use max or min value
+                    #print('\t', r, new_r)
+                    u = v / r
+                    new_coords = coords1 + new_r * u
+                    coords[j] = new_coords
+        #print(coords)
+        return coords
 
