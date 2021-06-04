@@ -24,15 +24,19 @@ import sys
 
 
 def run_force_pred(input_files='input_files', coord_files='coord_files',
-        force_files='force_files', energy_files='energy_files'):
+        force_files='force_files', energy_files='energy_files',
+        list_files='list_files'):
 
 
     startTime = datetime.now()
 
     print(startTime)
     molecule = Molecule() #initiate molecule class
-    #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
-    OPTParser(input_files, molecule, opt=True) #read in FCEZ for opt
+
+    if list_files:
+        input_files = open(list_files).read().split()
+    OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
+    #OPTParser(input_files, molecule, opt=True) #read in FCEZ for opt
     '''
     AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd',
         coord_files, force_files, energy_files, molecule)
@@ -40,8 +44,8 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
 
     '''
     NPParser('types_z', 
-            ['train_1frame_aspirin_coords'], 
-            ['train_1frame_aspirin_forces'], molecule)
+            ['train1_aspirin_coordinates'], 
+            ['train1_aspirin_forces'], molecule)
     '''
     '''
     NPParser('types_z', 
@@ -58,8 +62,11 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
 
     Writer.write_xyz(molecule.coords, molecule.atoms, 'coords.xyz', 'w')
     Writer.write_xyz(molecule.forces, molecule.atoms, 'forces.xyz', 'w')
+    #Writer.write_xyz(molecule.energies, molecule.atoms, 'energies.xyz', 'w')
+    open('energies.txt', 'w').write('{}\n'.format(molecule.energies))
 
-    #'''
+    '''
+    print('rotate coords/forces')
     Converter.get_rotated_forces(molecule)
     molecule.forces = molecule.rotated_forces
     molecule.coords = molecule.rotated_coords
@@ -73,7 +80,7 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
             molecule.atoms, 'rot_coords.xyz', 'w')
     Writer.write_xyz(molecule.rotated_forces, 
             molecule.atoms, 'rot_forces.xyz', 'w')
-    #'''
+    '''
 
     #print(molecule.mat_NRF[0])
     #Converter.get_coords_from_NRF(molecule.mat_NRF[0]/33, molecule.atoms,
@@ -100,12 +107,13 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
     #'''
     run_net = True
     if run_net:
-        #Molecule.make_train_test(molecule, molecule.energies) 
+        print('get NN')
+        Molecule.make_train_test(molecule, molecule.energies) 
             #get train and test sets
         network = Network() #initiate network class
         Network.get_variable_depth_model(network, molecule) #train NN
         nsteps=1000
-        Network.run_NVE(network, molecule, timestep=0.1, nsteps=nsteps)
+        Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
 
     #'''
 
@@ -209,6 +217,9 @@ def main():
         group = parser.add_argument('-e', '--energy_files', nargs='+', 
                 metavar='file', default=[],
                 help='name of file/s containing energies.')
+        group = parser.add_argument('-l', '--list_files', action='store', 
+                metavar='file', default=False,
+                help='file containing list of file paths.')
         op = parser.parse_args()
     except argparse.ArgumentError:
         logging.error('Command line arguments are ill-defined, '
@@ -217,7 +228,8 @@ def main():
         sys.exit(1)
 
     run_force_pred(input_files=op.input_files, coord_files=op.coord_files, 
-            force_files=op.force_files, energy_files=op.energy_files)
+            force_files=op.force_files, energy_files=op.energy_files, 
+            list_files=op.list_files)
 
 if __name__ == '__main__':
     main()

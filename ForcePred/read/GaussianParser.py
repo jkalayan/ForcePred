@@ -9,6 +9,7 @@ from itertools import islice
 import numpy as np
 from ..calculate.Converter import Converter
 import sys
+import warnings
 
 class OPTParser(object):
     '''
@@ -85,16 +86,18 @@ class OPTParser(object):
                         save_data = True
                     if opt == False and 'Normal termination' in line:
                         save_data = True
-                    if save_data:
+                    if save_data and self.atoms == self.new_atoms:
                         self.opt_structures += 1
                         self.coords.append(inp_coord)
                         self.std_coords.append(std_coord)
                         self.forces.append(force)
                         self.energies.append(energy)
+            print(filename)
+            sys.stdout.flush()
             if self.atoms == self.new_atoms:
                 self.new_atoms = []
             else:
-                raise ValueError('Structure %s in file %s is different. '\
+                warnings.warn('Structure %s in file %s is different. '\
                         'Saved structure is %s - ensure all files contain '\
                         'this structure.' 
                         % (self.new_atoms, filename, self.atoms))

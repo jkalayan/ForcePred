@@ -28,10 +28,12 @@ class Network(object):
     def get_variable_depth_model(self, molecule):
         _NRF = molecule.mat_NRF
         _F = molecule.mat_F
-        train = False
+        train = True #False
         if train:
             _NRF = np.take(molecule.mat_NRF, molecule.train, axis=0)
             _F = np.take(molecule.mat_F, molecule.train, axis=0)
+            open('train_indices.txt', 'w').write(
+                    '{}\n'.format(molecule.train))
         #normalise inputs and forces
         self.scale_NRF = np.amax(_NRF)
         self.scale_NRF_min = np.amin(_NRF)
@@ -51,8 +53,8 @@ class Network(object):
         model_in = Input(shape=(_NRF.shape[1],))
         model = model_in
         best_error = 1000
-        n_nodes = 100 #1000
-        n_epochs = 1000 #100000
+        n_nodes = 1000 #1000
+        n_epochs = 100000 #100000
         for i in range(0, max_depth):
             if i > 0:
                 model = concatenate([model,model_in])
@@ -132,9 +134,9 @@ class Network(object):
         atoms = molecule.atoms
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
-        scale_NRF = 13036.561501577185 #network.scale_NRF # 
-        scale_NRF_min = 0.1 #network.scale_NRF_min
-        scale_F = 547.4610197022887 #network.scale_F # 
+        scale_NRF = network.scale_NRF #13036.561501577185 # 
+        scale_NRF_min = network.scale_NRF_min #0.012938465758322835 #
+        scale_F = network.scale_F #547.4610197022887 # 
         #print(scale_NRF, scale_NRF_min, scale_F)
         print('scale_NRF: {}\nscale_NRF_min: {}\nscale_F: {}\n'.format(
                 scale_NRF, scale_NRF_min, scale_F))
@@ -157,6 +159,7 @@ class Network(object):
             mat_NRF = Network.get_NRF_input(coords_current, atoms, 
                     n_atoms, _NC2)
             mat_NRF_scaled = mat_NRF / scale_NRF
+            '''
             if np.any((mat_NRF > scale_NRF)) or \
                     np.any((mat_NRF < scale_NRF_min)):
                 #print(mat_NRF_scaled)
@@ -168,6 +171,7 @@ class Network(object):
                 mat_NRF_scaled = Network.get_NRF_input(coords_current, 
                         atoms, n_atoms, _NC2) / scale_NRF
                 #print(mat_NRF_scaled)
+            '''
 
             open('nn-NRF-scaled.txt', 'a').write(
                     '{}\n'.format(mat_NRF_scaled))#.close()
