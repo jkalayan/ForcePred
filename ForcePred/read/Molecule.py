@@ -51,7 +51,7 @@ class Molecule(object):
                 #translations
                 x_trans_sum = np.sum(self.forces[s],axis=0)[x]
                 #print(x_trans_sum)
-                x_trans_sum = abs(round(x_trans_sum, 1))
+                x_trans_sum = abs(round(x_trans_sum, 0))
                 if abs(x_trans_sum) != 0 and s not in unconserved:
                     unconserved.append(s)
                     translations.append(x_trans_sum)
@@ -62,7 +62,7 @@ class Molecule(object):
                 diff = np.cross(r, self.forces[s][i])
                 i_rot_sum = np.add(i_rot_sum, diff)
             #print(i_rot_sum)
-            i_rot_sum = np.round(np.abs(i_rot_sum), 1)
+            i_rot_sum = np.round(np.abs(i_rot_sum), 0)
             if np.all(i_rot_sum != 0) and s not in unconserved:
                 unconserved.append(s)
                 rotations.append(i_rot_sum)
@@ -72,8 +72,9 @@ class Molecule(object):
                     (unconserved, self.coords.shape))
             print('translations {}'.format(translations))
             print('rotations {}'.format(rotations))
-            #Molecule.remove_variants(self, unconserved)
-            #print('New dataset shape is', self.coords.shape)
+            Molecule.remove_variants(self, unconserved)
+            print('New dataset shape is', self.coords.shape, 
+                    self.forces.shape, self.energies.shape)
 
     def remove_variants(self, unconserved):
         for s in unconserved:
@@ -88,13 +89,17 @@ class Molecule(object):
         indices for each set.'''
         sorted_i = np.argsort(variable)
         _Nstructures = len(variable)
-        _Ntrain = int(_Nstructures / 4)
+        _Ntrain = int(_Nstructures / 20) #4
+        print(_Nstructures, _Ntrain)
         #a = np.array(range(0,_Nstructures))
         a = sorted_i
         b = np.where(a % int(_Nstructures/_Ntrain+1),-1,a)
         c = np.where(a % int(_Nstructures/_Ntrain+1),a,-1)
         molecule.train = b[(b>=0)]
+        np.savetxt('train_indices.txt', b)
+        #print(molecule.train.shape)
         molecule.test = c[(c>0)]
+        #print(molecule.test.shape)
 
     def sort_by_energy(self):
         self.energies = np.array(self.energies)

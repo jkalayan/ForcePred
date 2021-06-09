@@ -10,7 +10,7 @@ from MDAnalysis import *
 import MDAnalysis.transformations as trans
 import numpy as np
 #from ..calculate.Converter import Converter
-
+from ..write.Writer import Writer 
 
 class AMBLAMMPSParser(object):
     '''
@@ -93,6 +93,9 @@ class AMBLAMMPSParser(object):
         self.atom_kinetics = \
                 atom_energies.reshape((-1,3))[:,1].reshape(n_atoms,-1)
         self.energies = np.sum(self.atom_potentials, axis=1)
+
+        np.savetxt('mm-PE.txt', self.atom_potentials)
+        np.savetxt('mm-KE.txt', self.atom_kinetics)
 
     def get_3D_array(self, np_list, n_structures):
         return np.reshape(np.vstack(np_list), (n_structures,-1,3))

@@ -52,4 +52,10 @@ class Writer(object):
                         symbols[atom], x, y, z))
             gaus_cart_file.write('\n') 
             gaus_cart_file.close()
+
+    def write_list(list_, filename, open_type):
+        outfile = open(filename, open_type)
+        for i in list_:
+            outfile.write('{}\n'.format(i))
+        outfile.close()
        

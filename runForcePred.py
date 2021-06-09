@@ -13,8 +13,8 @@ import argparse
 import numpy as np
 
 from ForcePred import Molecule, OPTParser, NPParser, Converter, \
-        Permuter, AMBLAMMPSParser, AMBERParser, Binner, Writer, Plotter, \
-        Network
+        Permuter, AMBLAMMPSParser, AMBERParser, XYZParser, Binner, \
+        Writer, Plotter, Network
 
 import sys
 #import numpy as np
@@ -23,7 +23,8 @@ import sys
 #os.environ['OMP_NUM_THREADS'] = '8'
 
 
-def run_force_pred(input_files='input_files', coord_files='coord_files',
+def run_force_pred(input_files='input_files', 
+        atom_file='atom_file', coord_files='coord_files',
         force_files='force_files', energy_files='energy_files',
         list_files='list_files'):
 
@@ -35,7 +36,7 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
 
     if list_files:
         input_files = open(list_files).read().split()
-    OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
+    #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
     #OPTParser(input_files, molecule, opt=True) #read in FCEZ for opt
     '''
     AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd',
@@ -56,14 +57,27 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
     AMBERParser('molecules.prmtop', '1md.mdcrd', 'ascii.frc', 
             molecule)
     '''
-    Molecule.check_force_conservation(molecule) #
-    Converter(molecule) #get pairwise forces
+
+    #'''
+    XYZParser(atom_file, coord_files, force_files, 
+            energy_files, molecule)
+    #'''
+
+
     print(molecule)
 
-    Writer.write_xyz(molecule.coords, molecule.atoms, 'coords.xyz', 'w')
-    Writer.write_xyz(molecule.forces, molecule.atoms, 'forces.xyz', 'w')
-    #Writer.write_xyz(molecule.energies, molecule.atoms, 'energies.xyz', 'w')
-    open('energies.txt', 'w').write('{}\n'.format(molecule.energies))
+    '''
+    Writer.write_xyz(molecule.coords, molecule.atoms, 'check-coords.xyz', 'w')
+    Writer.write_xyz(molecule.forces, molecule.atoms, 'check-forces.xyz', 'w')
+    np.savetxt('check-energies.txt', molecule.energies)
+    '''
+
+    Molecule.check_force_conservation(molecule) #
+    Converter(molecule) #get pairwise forces
+
+
+
+
 
     '''
     print('rotate coords/forces')
@@ -104,18 +118,16 @@ def run_force_pred(input_files='input_files', coord_files='coord_files',
 
     sys.stdout.flush()
 
-    #'''
     run_net = True
     if run_net:
         print('get NN')
-        Molecule.make_train_test(molecule, molecule.energies) 
+        Molecule.make_train_test(molecule, molecule.energies.flatten()) 
             #get train and test sets
         network = Network() #initiate network class
         Network.get_variable_depth_model(network, molecule) #train NN
-        nsteps=1000
+        nsteps=10000
         Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
 
-    #'''
 
 
     '''
@@ -208,6 +220,9 @@ def main():
                 metavar='file', default=[],
                 help='name of file/s containing forces '\
                 'coordinates and energies.')
+        group = parser.add_argument('-a', '--atom_file', 
+                metavar='file', default=None,
+                help='name of file/s containing atom nuclear charges.')
         group = parser.add_argument('-c', '--coord_files', nargs='+', 
                 metavar='file', default=[],
                 help='name of file/s containing coordinates.')
@@ -227,9 +242,9 @@ def main():
         raise
         sys.exit(1)
 
-    run_force_pred(input_files=op.input_files, coord_files=op.coord_files, 
-            force_files=op.force_files, energy_files=op.energy_files, 
-            list_files=op.list_files)
+    run_force_pred(input_files=op.input_files, atom_file=op.atom_file, 
+            coord_files=op.coord_files, force_files=op.force_files, 
+            energy_files=op.energy_files, list_files=op.list_files)
 
 if __name__ == '__main__':
     main()

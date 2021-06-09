@@ -272,18 +272,23 @@ class Converter(object):
 
         n_atoms = len(atoms)
         #print(_NRF)
-        scale_NRF = _NRF / scale
-        scale_min_NRF = _NRF / scale_min
-        r_min = (1 / scale) ** 0.5
-        r_max = (1 / scale_min) ** 0.5
+        scale_NRF = _NRF / np.amax(scale)
+        scale_min_NRF = _NRF / np.amin(scale_min)
+        #r_min = (1 / scale) ** 0.5
+        #r_max = (1 / scale_min) ** 0.5
+
         #print(scale_NRF)
         #print(scale_min_NRF)
         #print(coords)
         n = -1
         for i in range(n_atoms-1):
+            zA = atoms[i]
             for j in range(i+1, n_atoms):
-                r = Converter.get_r(coords[i], coords[j])
                 n += 1
+                zB = atoms[j]
+                r = Converter.get_r(coords[i], coords[j])
+                r_min = ((zA * zB) / scale[n]) ** 0.5
+                r_max = ((zA * zB) / scale_min[n]) ** 0.5
                 #print(i, j, n)
                 #print('\t', r)
                 s = None

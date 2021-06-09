@@ -9,6 +9,7 @@ from .read.NPParser import NPParser
 from .read.GaussianParser import OPTParser
 from .read.AMBLAMMPSParser import AMBLAMMPSParser
 from .read.AMBERParser import AMBERParser
+from .read.XYZParser import XYZParser
 from .calculate.Converter import Converter
 from .calculate.Permuter import Permuter
 from .calculate.Binner import Binner

@@ -62,6 +62,7 @@ class OPTParser(object):
           
     def iterate_files(self, filenames, opt):
         for filename in filenames:
+            print(filename)
             input_ = open(filename, 'r')
             inp_coord, std_coord, force, energy = None, None, None, None
             for line in input_:
@@ -71,15 +72,19 @@ class OPTParser(object):
                     if 'Input orientation:' in line:
                         inp_coord = self.clean(self.extract(4, input_)) #\
                                 #* Converter.au2Ang
+                        #print('inp_coord', inp_coord.shape)
                     if 'Standard orientation:' in line:
                         std_coord = self.clean(self.extract(4, input_)) #\
                                 #* Converter.au2Ang
+                        #print('std_coord', std_coord.shape)
                     if 'SCF Done:' in line:
                         energy = float(line.split()[4]) \
                                 * Converter.Eh2kcalmol
+                        #print('e', energy)
                     if 'Axes restored to original set' in line:
                         force = self.clean(self.extract(4, input_)) \
                                 * Converter.au2kcalmola
+                        #print('f', force.shape)
                     #only save info if structure is optimised
                     save_data = False
                     if opt and 'Optimization completed' in line:
@@ -92,7 +97,7 @@ class OPTParser(object):
                         self.std_coords.append(std_coord)
                         self.forces.append(force)
                         self.energies.append(energy)
-            print(filename)
+            #print()
             sys.stdout.flush()
             if self.atoms == self.new_atoms:
                 self.new_atoms = []
