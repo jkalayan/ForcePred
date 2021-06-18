@@ -15,6 +15,7 @@ from ..calculate.Converter import Converter
 from ..write.Writer import Writer
 from ..read.Molecule import Molecule
 import sys
+import time
 
 class Network(object):
     '''
@@ -26,12 +27,14 @@ class Network(object):
 
 
     def get_variable_depth_model(self, molecule):
+        start_time = time.time()
         _NRF = molecule.mat_NRF
         _F = molecule.mat_F
         train = True #False
         if train:
             _NRF = np.take(molecule.mat_NRF, molecule.train, axis=0)
             _F = np.take(molecule.mat_F, molecule.train, axis=0)
+            np.savetxt('train-NRF.txt', _NRF)
             np.savetxt('train-actual-decomp-force.txt', _F)
             #np.savetxt('train_indices.txt', molecule.train)
         #sys.exit()
@@ -41,9 +44,9 @@ class Network(object):
         self.scale_NRF_all = np.amax(_NRF, axis=0)
         self.scale_NRF_min_all = np.amin(_NRF, axis=0)
         #print(np.amax(_NRF), np.amin(_NRF))
-        #_NRF = _NRF / self.scale_NRF
-        _NRF = Network.get_scaled(0, 1, self.scale_NRF_min, 
-                self.scale_NRF, _NRF)
+        _NRF = _NRF / self.scale_NRF
+        #_NRF = Network.get_scaled(0, 1, self.scale_NRF_min, 
+                #self.scale_NRF, _NRF)
         #_NRF = Network.get_scaled(0, 1, self.scale_NRF_min_all, 
                 #self.scale_NRF_all, _NRF)
 
@@ -51,9 +54,9 @@ class Network(object):
         self.scale_F_min = 2 * np.amin(np.absolute(_F))
         #self.scale_F_all = 2 * np.amax(np.absolute(_F), axis=0)
         #self.scale_F_min_all = 2 * np.amin(np.absolute(_F), axis=0)
-        #_F = _F / self.scale_F + 0.5
-        _F = Network.get_scaled(0, 1, self.scale_F_min, 
-                self.scale_F, _F) + 0.5
+        _F = _F / self.scale_F + 0.5
+        #_F = Network.get_scaled(0, 1, self.scale_F_min, 
+                #self.scale_F, _F) + 0.5
         #_F = Network.get_scaled(0, 1, self.scale_F_min_all, 
                 #self.scale_F_all, _F) + 0.5
         print('scale_NRF: {}\nscale_NRF_min: {}\nscale_F: {}\n'\
@@ -97,8 +100,8 @@ class Network(object):
             #end_training = np.loadtxt('end_file', dtype=int)
             #if end_training == 1:
                 #break
-            #if time.time()-start_time >= 518400:
-                #break
+            if time.time()-start_time >= 518400:
+                break
             model = load_model(file_name)
             model.trainable = False
             model = model(model_in)
@@ -113,6 +116,7 @@ class Network(object):
         _NC2 = int(n_atoms * (n_atoms-1)/2)
         test_NRF = np.take(molecule.mat_NRF, molecule.test, axis=0)
         test_F = np.take(molecule.mat_F, molecule.test, axis=0)
+        np.savetxt('test-NRF.txt', test_NRF)
         np.savetxt('test-actual-decomp-force.txt', test_F)
 
 
@@ -124,27 +128,27 @@ class Network(object):
 
         scale_NRF_test = np.amax(test_NRF)
         scale_NRF_min_test = np.amin(test_NRF)
-        test_NRF = Network.get_scaled(0, 1, scale_NRF_min_test, 
-                scale_NRF_test, test_NRF)
+        test_NRF = test_NRF / scale_NRF_test
+        #test_NRF = Network.get_scaled(0, 1, scale_NRF_min_test, 
+                #scale_NRF_test, test_NRF)
 
         scale_F_test = 2 * np.amax(np.absolute(test_F))
         scale_F_min_test = 2 * np.amin(np.absolute(test_F))
-        test_F = Network.get_scaled(0, 1, scale_F_min_test, 
-                scale_F_test, test_F) + 0.5
+        test_F = test_F / scale_F_test + 0.5
+        #test_F = Network.get_scaled(0, 1, scale_F_min_test, 
+                #scale_F_test, test_F) + 0.5
 
         model = load_model('best_ever_model')
         print('test', model.evaluate(test_NRF, test_F, verbose=2))
         print('train', model.evaluate(_NRF, _F, verbose=2))
         test_prediction_scaled = model.predict(test_NRF)
         prediction_scaled = model.predict(_NRF)
-        #test_prediction = (test_prediction_scaled - 0.5) * scale_F
-        test_prediction = Network.get_unscaled(0, 1, scale_NRF_min_test, 
-                scale_NRF_test, test_prediction_scaled - 0.5)
-        #train_prediction = (prediction_scaled - 0.5) * scale_F
-        train_prediction = Network.get_unscaled(0, 1, scale_NRF_min, 
-                scale_NRF, prediction_scaled - 0.5)
-        #np.savetxt('test_predictions', test_predictions)
-        #np.savetxt('train_predictions', train_predictions)
+        test_prediction = (test_prediction_scaled - 0.5) * scale_F
+        #test_prediction = Network.get_unscaled(0, 1, scale_NRF_min_test, 
+                #scale_NRF_test, test_prediction_scaled - 0.5)
+        train_prediction = (prediction_scaled - 0.5) * scale_F
+        #train_prediction = Network.get_unscaled(0, 1, scale_NRF_min, 
+                #scale_NRF, prediction_scaled - 0.5)
 
         test_recomp_forces = Network.get_recomposed_forces(coords_test, 
                 test_prediction, n_atoms, _NC2)
@@ -226,19 +230,27 @@ class Network(object):
 
     def run_NVE(network, molecule, timestep, nsteps):
         #mm = MM() #initiate MM class
+
+        scale_coords = False
+        if scale_coords:
+            print('\ncoordinates being scaled by min and max NRFs')
+
         mm = Molecule()
         mm.atoms = molecule.atoms
+        mm.coords = []
+        mm.forces = []
+        mm.energies = []
         coords_init = molecule.coords[0]
         atoms = molecule.atoms
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
 
-        scale_NRF = network.scale_NRF #13036.561501577185 # 
-        scale_NRF_min = network.scale_NRF_min #0.012938465758322835 #
-        scale_NRF_all = network.scale_NRF_all 
-        scale_NRF_min_all = network.scale_NRF_min_all
-        scale_F = network.scale_F #547.4610197022887 # 
-        scale_F_min = network.scale_F_min #547.4610197022887 #
+        scale_NRF = 9609.948466619555 #network.scale_NRF # 
+        scale_NRF_min = 12.29385814543981 #network.scale_NRF_min #
+        scale_NRF_all = 0 #network.scale_NRF_all 
+        scale_NRF_min_all = 0 #network.scale_NRF_min_all
+        scale_F = 15808.277117988835 #network.scale_F # 
+        scale_F_min = 0 #network.scale_F_min #
         #scale_F_all = network.scale_F_all 
         #scale_F_min_all = network.scale_F_min_all 
         #print(scale_NRF, scale_NRF_min, scale_F)
@@ -253,79 +265,104 @@ class Network(object):
         model = load_model('best_ever_model')
         open('nn-coords.xyz', 'w').close()
         open('nn-forces.xyz', 'w').close()
-        f1 = open('nn-NRF-scaled.txt', 'ab')
-        f2 = open('nn-decomp-force-scaled.txt', 'ab')
+        f1 = open('nn-NRF.txt', 'ab')
+        f2 = open('nn-decomp-force.txt', 'ab')
         #f3 = open('nn-E.txt', 'ab')
-        coords_prev = coords_init
+        #coords_prev = coords_init
+        coords_prev = Converter.translate_coords(
+                coords_init, atoms)
         coords_current = coords_init
         _E_prev = 0
         for i in range(nsteps):
             #print('\t', i)
             #print('NVE coords', coords_current.shape, coords_current)
+
+            #translate coords back to center
+            #coords_current = Converter.translate_coords(
+                    #coords_current, atoms)
+
             mat_NRF = Network.get_NRF_input(coords_current, atoms, 
                     n_atoms, _NC2)
-            #mat_NRF_scaled = mat_NRF / scale_NRF
-            mat_NRF_scaled = Network.get_scaled(0, 1, scale_NRF_min, 
-                    scale_NRF, mat_NRF)
+            mat_NRF_scaled = mat_NRF / scale_NRF
+            #mat_NRF_scaled = Network.get_scaled(0, 1, scale_NRF_min, 
+                    #scale_NRF, mat_NRF)
             
-            '''
             #scale NRF to not go beyond max and min
-            if np.any((mat_NRF > scale_NRF)) or \
-                    np.any((mat_NRF < scale_NRF_min)):
-                #print(mat_NRF_scaled)
-                #print(mat_NRF)
-                #print()
-                coords_current = Converter.get_coords_from_NRF(
-                        mat_NRF[0], molecule.atoms, 
-                        coords_current, scale_NRF_all, scale_NRF_min_all)
-                mat_NRF = Network.get_NRF_input(coords_current, 
-                        atoms, n_atoms, _NC2)
-                mat_NRF_scaled = Network.get_scaled(0, 1, scale_NRF_min, 
-                        scale_NRF, mat_NRF)
-                #print(mat_NRF_scaled)
-            '''
+            if scale_coords:
+                #if np.any(np.greater(mat_NRF, scale_NRF)) or \
+                        #np.any(np.less(mat_NRF, scale_NRF_min)):
+                if np.any(np.greater(mat_NRF, scale_NRF_all)) or \
+                        np.any(np.less(mat_NRF, scale_NRF_min_all)):
+                    #print(mat_NRF_scaled)
+                    #print(mat_NRF)
+                    #print()
+                    #rs = Converter.get_r_from_NRF(mat_NRF[0], atoms)
+                    #print('\n', rs)
+                    #coords_current = Converter.get_coords_from_NRF(
+                            #mat_NRF[0], molecule.atoms, 
+                            #coords_current, scale_NRF, scale_NRF_min)
+                    coords_current = Converter.get_coords_from_NRF(
+                            mat_NRF[0], molecule.atoms, 
+                            coords_current, scale_NRF_all, scale_NRF_min_all)
+                    mat_NRF = Network.get_NRF_input(coords_current, 
+                            atoms, n_atoms, _NC2)
+                    #rs = Converter.get_r_from_NRF(mat_NRF[0], atoms)
+                    #print('\n', rs)
+                    mat_NRF_scaled = mat_NRF / scale_NRF
+                    #mat_NRF_scaled = Network.get_scaled(0, 1, scale_NRF_min, 
+                            #scale_NRF, mat_NRF)
+                    #print(mat_NRF_scaled)
+                    sys.stdout.flush()
 
-            #open('nn-NRF-scaled.txt', 'a').write(
-                    #'{}\n'.format(mat_NRF_scaled))#.close()
-            np.savetxt(f1, mat_NRF_scaled)
             prediction_scaled = model.predict(mat_NRF_scaled)
-            #open('nn-decomp-force-scaled.txt', 'a').write(
-                    #'{}\n'.format(prediction_scaled))#.close()
-            np.savetxt(f2, prediction_scaled)
+            prediction = (prediction_scaled - 0.5) * scale_F
+            #prediction = Network.get_unscaled(0, 1, scale_NRF_min, scale_NRF, 
+                    #prediction_scaled - 0.5)
 
-            #prediction = (prediction_scaled - 0.5) * scale_F
-            prediction = Network.get_unscaled(0, 1, scale_NRF_min, scale_NRF, 
-                    prediction_scaled - 0.5)
             recomp_forces = Network.get_recomposed_forces([coords_current], 
                     [prediction], n_atoms, _NC2)
             #print('NVE recomp', recomp_forces.shape, recomp_forces)
 
             '''
+            ##rotate forces
+            #print('shape c', coords_current.shape)
+            #print('shape f', recomp_forces.shape)
             mm.coords = mm.get_3D_array([coords_current])
             mm.forces = mm.get_3D_array([recomp_forces])
             mm.check_force_conservation()
             Converter.get_rotated_forces(mm)
 
             coords_current = mm.rotated_coords[0]
-            recomp_forces = mm.rotated_forces[0]
+            #print('shape c', coords_current.shape)
+            recomp_forces = mm.rotated_forces
+            #print('shape f', recomp_forces.shape)
             '''
 
-            coords_next, dE = MM.calculate_verlet_step(coords_current, 
+            coords_next, dE, v = MM.calculate_verlet_step(coords_current, 
                     coords_prev, recomp_forces[0], masses, timestep)
+            steps = MM.calculate_step(coords_current, coords_prev, 
+                    recomp_forces[0], timestep, masses, timestep)
             _E = _E_prev - dE
-            open('nn-E.txt', 'a').write('{}\n'.format(_E))#.close()
-            #np.savetxt(f3, _E)
 
-            #if i%(nsteps/100) == 0:
+            #if i%(nsteps/100000) == 0:
+            np.savetxt(f1, mat_NRF)
+            np.savetxt(f2, prediction)
+            open('nn-E.txt', 'a').write('{}\n'.format(_E))#.close()
             Writer.write_xyz([coords_current], molecule.atoms, 
                 'nn-coords.xyz', 'a', i)
             Writer.write_xyz(recomp_forces, molecule.atoms, 
                 'nn-forces.xyz', 'a', i)
+            Writer.write_xyz([v], molecule.atoms, 
+                'nn-velocities.xyz', 'a', i)
+            mm.coords.append(coords_current)
+            mm.forces.append(recomp_forces)
+            mm.energies.append(_E)
 
             coords_prev = coords_current
             coords_current = coords_next
             _E_prev = _E
             #print()
+        return mm
 
 
         

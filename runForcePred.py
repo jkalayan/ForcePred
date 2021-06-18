@@ -64,37 +64,38 @@ def run_force_pred(input_files='input_files',
     #'''
 
 
-    print(molecule)
-
     '''
-    Writer.write_xyz(molecule.coords, molecule.atoms, 'check-coords.xyz', 'w')
-    Writer.write_xyz(molecule.forces, molecule.atoms, 'check-forces.xyz', 'w')
-    np.savetxt('check-energies.txt', molecule.energies)
+    Writer.write_xyz(molecule.coords, molecule.atoms, 'qm-coords.xyz', 'w')
+    Writer.write_xyz(molecule.forces, molecule.atoms, 'qm-forces.xyz', 'w')
+    np.savetxt('qm-energies.txt', molecule.energies)
     '''
 
-    Molecule.check_force_conservation(molecule) #
-    Converter(molecule) #get pairwise forces
+    get_decomp = True
+    if get_decomp:
+        print(molecule)
+        print('check and get force decomp')
+        Molecule.check_force_conservation(molecule) #
+        Converter(molecule) #get pairwise forces
 
 
 
 
+    get_rotate = False
+    if get_rotate:
+        print('rotate coords/forces')
+        Converter.get_rotated_forces(molecule)
+        molecule.forces = molecule.rotated_forces
+        molecule.coords = molecule.rotated_coords
+        Molecule.check_force_conservation(molecule) #
+        Converter(molecule) # get pairwise forces
 
-    '''
-    print('rotate coords/forces')
-    Converter.get_rotated_forces(molecule)
-    molecule.forces = molecule.rotated_forces
-    molecule.coords = molecule.rotated_coords
-    Molecule.check_force_conservation(molecule) #
-    Converter(molecule) # get pairwise forces
+        print(np.amax(molecule.mat_NRF), np.amin(molecule.mat_NRF))
+        #sys.exit()
 
-    print(np.amax(molecule.mat_NRF), np.amin(molecule.mat_NRF))
-    #sys.exit()
-
-    Writer.write_xyz(molecule.rotated_coords, 
-            molecule.atoms, 'rot_coords.xyz', 'w')
-    Writer.write_xyz(molecule.rotated_forces, 
-            molecule.atoms, 'rot_forces.xyz', 'w')
-    '''
+        Writer.write_xyz(molecule.rotated_coords, 
+                molecule.atoms, 'rot_coords.xyz', 'w')
+        Writer.write_xyz(molecule.rotated_forces, 
+                molecule.atoms, 'rot_forces.xyz', 'w')
 
     #print(molecule.mat_NRF[0])
     #Converter.get_coords_from_NRF(molecule.mat_NRF[0]/33, molecule.atoms,
@@ -118,17 +119,72 @@ def run_force_pred(input_files='input_files',
 
     sys.stdout.flush()
 
+    get_train_from_dih = False
+    if get_train_from_dih:
+        dihedrals = Binner()
+        list_dih = [[1, 2, 3, 6], [3, 2, 1, 7],
+                [2, 1, 7, 10]]
+        '''
+        list_dih = [[1,2,3,6], [3,2,1,7], [2,1,7,10], [4,2,3,6], [5,2,3,6],
+                [4,2,1,7], [5,2,1,7], [4,2,1,8], [5,2,1,8], [4,2,1,9], 
+                [5,2,1,9], [8,1,2,3], [9,1,2,3], [8,1,7,10], [9,1,7,10]]
+        '''
+        dihedrals.get_dih_pop(molecule.coords, list_dih)
+
+        phis_1 = [i[0] for i in dihedrals.phis]
+        phis_2 = [i[1] for i in dihedrals.phis]
+        phis_3 = [i[2] for i in dihedrals.phis]
+
+        p1_list = []
+        p2_list = []
+        p3_list = []
+        train_phis = []
+        for i, p1, p2, p3 in zip(range(1,len(phis_1)+1), phis_1, 
+                phis_2, phis_3):
+            if int(p1) not in p1_list or int(p2) not in p2_list or \
+                    int(p3) not in p3_list:
+                train_phis.append(i)
+                p1_list.append(int(p1))
+                p2_list.append(int(p2))
+                p3_list.append(int(p3))
+            else:
+                continue
+
+        test_phis = []
+        for i in range(1, len(phis_1)+1):
+            if i not in train_phis:
+                test_phis.append(i)
+            else:
+                continue
+
+        train_phis = np.array(train_phis)
+        test_phis = np.array(test_phis)
+        print('train_phis', train_phis.shape, 'test_phis', test_phis.shape)
+
+                
+
+
     run_net = True
+    split = 2 #2 4 5 20 52 260
     if run_net:
         print('get NN')
-        Molecule.make_train_test(molecule, molecule.energies.flatten()) 
-            #get train and test sets
+        Molecule.make_train_test(molecule, molecule.energies.flatten(), 
+                split) #get train and test sets
+        #override train test
+        #molecule.train = train_phis
+        #molecule.test = test_phis
         network = Network() #initiate network class
-        Network.get_variable_depth_model(network, molecule) #train NN
-        nsteps=10000
-        Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
+        ###Network.get_variable_depth_model(network, molecule) #train NN
+        nsteps=1000
+        mm = Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
 
 
+    print('checking mm forces')
+    mm.coords = mm.get_3D_array([mm.coords])
+    mm.forces = mm.get_3D_array([mm.forces]) 
+    mm.energies = np.array(mm.energies)
+    mm.check_force_conservation()
+    #sys.exit()
 
     '''
     NPParser('types_z', 
@@ -159,48 +215,169 @@ def run_force_pred(input_files='input_files',
     '''
     bonds = Binner()
     list_bonds = [[1,4]]
-    bonds.get_bond_pop(molecule, list_bonds)
+    bonds.get_bond_pop(molecule.coords, list_bonds)
     '''
 
     '''
     angles = Binner()
     list_angles = [[2, 1, 3]]
-    angles.get_angle_pop(molecule, list_angles)
+    angles.get_angle_pop(molecule.coords, list_angles)
     '''
 
+    get_dihs = False
+    if get_dihs:
+        dihedrals = Binner()
+        list_dih = [[1, 2, 3, 6], [3, 2, 1, 7],
+                [2, 1, 7, 10]]
+        dihedrals.get_dih_pop(molecule.coords, list_dih)
+
+        phis_1 = [i[0] for i in dihedrals.phis]
+        phis_2 = [i[1] for i in dihedrals.phis]
+        phis_3 = [i[2] for i in dihedrals.phis]
+
+        _Es = molecule.energies.flatten()
+        Molecule.make_train_test(molecule, _Es, split)
+        train = molecule.train
+        test = molecule.test
+        #train = np.array(range(len(molecule.coords)))
+
+        Plotter.xyz_scatter(np.take(phis_1, train), np.take(phis_2, train), 
+                np.take(_Es, train), 
+                '$\phi_1$', '$\phi_2$', '$U$', 'train-12.png')
+        Plotter.xyz_scatter(np.take(phis_1, test), np.take(phis_2, test), 
+                np.take(_Es, test), 
+                '$\phi_1$', '$\phi_2$', '$U$', 'test-12.png')
+
+        mm_dihedrals = Binner()
+        mm_dihedrals.get_dih_pop(mm.coords, list_dih)
+        mm_phis_1 = [i[0] for i in mm_dihedrals.phis]
+        mm_phis_2 = [i[1] for i in mm_dihedrals.phis]
+        mm_phis_3 = [i[2] for i in mm_dihedrals.phis]
+
+
+        Plotter.xy_scatter([np.take(phis_1, train), mm_phis_1], 
+                [np.take(phis_2, train), mm_phis_2], 
+                ['train', 'mm'], ['k', 'r'], 
+                '$\phi_1$', '$\phi_2$', 'train-xy-12.png')
+        Plotter.xy_scatter([np.take(phis_1, test)], [np.take(phis_2, test)], 
+                [''], ['k'], '$\phi_1$', '$\phi_2$', 'test-xy-12.png')
+        Plotter.xy_scatter([np.take(phis_1, train), mm_phis_1], 
+                [np.take(phis_3, train), mm_phis_3], 
+                ['train', 'mm'], ['k', 'r'], 
+                '$\phi_1$', '$\phi_3$', 'train-xy-13.png')
+        Plotter.xy_scatter([np.take(phis_1, test)], [np.take(phis_3, test)], 
+                [''], ['k'], '$\phi_1$', '$\phi_3$', 'test-xy-13.png')
+
+        Plotter.hist_2d(phis_1, phis_2, '$\phi_1$', '$\phi_2$', 
+                'dih_hist12')
+        Plotter.hist_2d(phis_1, phis_3, '$\phi_1$', '$\phi_3$', 
+                'dih_hist13')
+        Plotter.hist_2d(phis_2, phis_3, '$\phi_2$', '$\phi_3$', 
+                'dih_hist23')
+
+        Plotter.xy_scatter([phis_1], [phis_2], [''], ['k'], 
+                '$\phi_1$', '$\phi_2$', 'dih_xy12')
+        Plotter.xy_scatter([phis_1], [phis_3], [''], ['k'], 
+                '$\phi_1$', '$\phi_3$', 'dih_xy13')
+        Plotter.xy_scatter([phis_2], [phis_3], [''], ['k'], 
+                '$\phi_2$', '$\phi_3$', 'dih_xy23')
+
+
+    scurves = False
+    if scurves:
+        train_bin_edges, train_hist = Binner.get_scurve(
+                np.loadtxt('train-actual-decomp-force.txt').flatten(), 
+                np.loadtxt('train-decomp-force.txt').flatten(), 
+                'train-hist.txt')
+
+        test_bin_edges, test_hist = Binner.get_scurve(
+                np.loadtxt('test-actual-decomp-force.txt').flatten(), 
+                np.loadtxt('test-decomp-force.txt').flatten(), 
+                'test-hist.txt')
+       
+        Plotter.plot_2d([train_bin_edges, test_bin_edges], 
+                [train_hist, test_hist], ['train', 'test'], 
+                'Error', '% of points below error', 's-curves.png')
+
     '''
-    dihedrals = Binner()
-    list_dih = [[1, 2, 3, 6], [3, 2, 1, 7],
-            [2, 1, 7, 10]]
-    dihedrals.get_dih_pop(molecule, list_dih)
+    coords = np.take(molecule.coords, molecule.train, axis=0)
+    forces = np.take(molecule.forces, molecule.train, axis=0)
+    mat_NRF = np.loadtxt('train-NRF.txt')
+    decomp = np.loadtxt('train-decomp-force.txt')
+    print('\nmat_NRF', mat_NRF.shape)
+    print('\ndecomp', decomp.shape)
 
-    phis_1 = [i[0] for i in molecule.phis]
-    phis_2 = [i[1] for i in molecule.phis]
-    phis_3 = [i[2] for i in molecule.phis]
-    #_Es = molecule.energies
-    #train, test = Molecule.make_train_test(molecule, _Es)
-    #train = np.array(range(len(molecule.cooords)))
+    measures = Binner()
+    list_bonds = [[1,2]]
+    measures.get_bond_pop(coords, list_bonds)
+    _CC = decomp[:,0]
+    print(measures.rs.shape, _CC.shape)
+    Plotter.xy_scatter([measures.rs], [_CC], ['CC bond'], ['k'], 
+            '$r$', 'decomp F', 'train-bond-CC.png')
 
-    #Plotter.xyz_scatter(np.take(phis_1, train), np.take(phis_2, train), 
-            #np.take(_Es, train), 
-            #'$\phi_1$', '$\phi_2$', '$U$', 'train-12c')
-    #Plotter.xyz_scatter(np.take(phis_1, test), np.take(phis_2, test), 
-            #np.take(_Es, test), 
-            #'$\phi_1$', '$\phi_2$', '$U$', 'test-12')
+    list_angles = [[2, 1, 3]]
+    measures.get_angle_pop(coords, list_angles)
+    _OCC = decomp[:,2]
+    Plotter.xy_scatter([measures.thetas], [_OCC], ['OCC angle'], ['k'],
+            '$\\theta$', 'decomp F', 'train-angle-OCC.png')
 
-    Plotter.hist_2d(phis_1, phis_2, '$\phi_1$', '$\phi_2$', 
-            'dih_binned12')
-    Plotter.hist_2d(phis_1, phis_3, '$\phi_1$', '$\phi_3$', 
-            'dih_binned13')
-    Plotter.hist_2d(phis_2, phis_3, '$\phi_2$', '$\phi_3$', 
-            'dih_binned23')
+    list_dih = [[3, 2, 1, 7]]
+    measures.get_dih_pop(coords, list_dih)
+    _OCCO = decomp[:,17]
+    Plotter.xy_scatter([measures.phis], [_OCCO], ['OCCO dih'], ['k'],
+            '$\Phi$', 'decomp F', 'train-dih-OCCO.png')
+
+    coords = np.take(molecule.coords, molecule.test, axis=0)
+    forces = np.take(molecule.forces, molecule.test, axis=0)
+    mat_NRF = np.loadtxt('test-NRF.txt')
+    decomp = np.loadtxt('test-decomp-force.txt')
+    print('\nmat_NRF', mat_NRF.shape)
+    print('\ndecomp', decomp.shape)
+
+    measures = Binner()
+    list_bonds = [[1,2]]
+    measures.get_bond_pop(coords, list_bonds)
+    _CC = decomp[:,0]
+    print(measures.rs.shape, _CC.shape)
+    Plotter.xy_scatter([measures.rs], [_CC], ['CC bond'], ['k'], 
+            '$r$', 'decomp F', 'test-bond-CC.png')
+
+    list_angles = [[2, 1, 3]]
+    measures.get_angle_pop(coords, list_angles)
+    _OCC = decomp[:,2]
+    Plotter.xy_scatter([measures.thetas], [_OCC], ['OCC angle'], ['k'], 
+            '$\\theta$', 'decomp F', 'test-angle-OCC.png')
+
+    list_dih = [[3, 2, 1, 7]]
+    measures.get_dih_pop(coords, list_dih)
+    _OCCO = decomp[:,17]
+    Plotter.xy_scatter([measures.phis], [_OCCO], ['OCCO dih'], ['k'], 
+            '$\Phi$', 'decomp F', 'test-dih-OCCO.png')
     '''
 
 
 
-    #Molecule.make_train_test(molecule, molecule.energies)
-    #network = Network()
-    #Network.get_variable_depth_model(network, molecule)
+
+
+
+
+
+    '''
+    #for h in range(len(decomp)):
+    for h in range(1):
+        n = -1
+        for i in range(len(molecule.atoms)):
+            zA = molecule.atoms[i]
+            for j in range(i):
+                n += 1
+                zB = molecule.atoms[j]
+                _NRF = mat_NRF[h][n]
+                #r = molecule.mat_r[h][n]
+                #r_recomp = (zA * zB / _NRF) ** 0.5
+                #print(n+1, '-', i+1, j+1, '-', zA, zB, '-', decomp[h][n])
+                #print('\t', _NRF, r, r_recomp)
+    '''
+
 
     #Permuter(molecule) #not used yet
 

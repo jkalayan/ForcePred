@@ -28,65 +28,42 @@ class Binner(object):
     def __str__(self):
         return ('\nN structures: %s,' % (len(self.coords)))
 
-    def get_bond_pop(self, molecule, bonds):
-        for i in range(len(molecule.coords)):
+    def get_bond_pop(self, coords, bonds):
+        for i in range(len(coords)):
             for bond in bonds:
                 bond = np.array(bond)-1 #index correctly
-                v = molecule.coords[i][bond[1]] - molecule.coords[i][bond[0]]
-                r = np.linalg.norm(v)
+                #v = coords[i][bond[1]] - coords[i][bond[0]]
+                #r = np.linalg.norm(v)
+                r = np.linalg.norm(coords[i][bond[1]] - 
+                        coords[i][bond[0]])
                 self.rs.append(r)
         self.rs = np.array(self.rs).reshape(-1,len(bonds))
 
-    def get_angle_pop(self, molecule, angles):
+    def get_angle_pop(self, coords, angles):
         '''angles is a list of lists containing atom indices involved 
         in angles of interest'''
         self.angles = np.array(angles)
-        for i in range(len(molecule.coords)):
+        for i in range(len(coords)):
             for angle in angles:
                 angle = np.array(angle)-1 #index correctly
-                theta = Binner.get_angles(molecule.coords[i], angle)
+                theta = Binner.get_angles(coords[i], angle)
                 self.thetas.append(theta)
         self.thetas = np.array(self.thetas).reshape(-1,len(angles))
 
-    def get_dih_pop(self, molecule, dihs):
+    def get_dih_pop(self, coords, dihs):
         ''' dihs is a list of lists. Each list is of the atom indices
         involved in the dihedral of interest. '''
         self.dihs = np.array(dihs)
-        for i in range(len(molecule.coords)):
+        for i in range(len(coords)):
             for dih in dihs:
                 dih = np.array(dih)-1 #index correctly
-                phi = Binner.get_dih_angles(molecule.coords[i], dih)
+                phi = Binner.get_dih_angles(coords[i], dih)
                 self.phis.append(phi)
                 self.confs.append(Binner.get_conf(phi))
         self.phis = np.array(self.phis).reshape(-1,len(dihs))
         self.confs = np.array(self.confs).reshape(-1,len(dihs))
-        molecule.phis = self.phis
+        #molecule.phis = self.phis
 
-        '''
-        sorted_i = np.argsort(molecule.energies)
-        #print(sorted_i)
-        #np_list = np.vstack(molecule.energies)
-        #np_list = np_list[sorted_i]
-        #print(np_list)
-        print(self.dihs)
-
-        #print(self.phis[:200])
-        #print(self.confs[:200])
-
-        for i in range(1, 50):
-            print(sorted_i[-i], molecule.energies[sorted_i[-i]], 
-                    self.phis[sorted_i[-i]], 
-                    self.confs[sorted_i[-i]])
-
-        phis_1 = [i[0] for i in self.phis]
-        phis_2 = [i[1] for i in self.phis]
-        phis_3 = [i[2] for i in self.phis]
-        _Es = molecule.energies
-        Plotter.xyz_scatter(phis_1, phis_2, _Es, 
-                '$\phi_1$', '$\phi_2$', '$U$', 'xyz_12')
-        Writer.write_xyz([molecule.coords[sorted_i[-1]]], molecule.atoms, 
-                'TS-1-2.xyz')
-        '''
 
     def get_angles(coords, angle):
         v1 = coords[angle[0]] - coords[angle[1]]
@@ -113,7 +90,8 @@ class Binner(object):
         x = np.dot(n1, n2)
         y = np.dot(m, n2)
         phi = Converter.rad2deg * np.arctan2(y, x)
-        return int(phi)
+        #return int(phi)
+        return round(phi, 2)
 
     def get_conf(phi):
         if phi >= 120 or phi < -120:
@@ -124,4 +102,16 @@ class Binner(object):
             conf = 'g+'
         return conf
 
+    def get_scurve(baseline, values, filename):
+        RSE = np.sqrt((baseline-values)**2)
+        print(np.amax(RSE))
+        print(np.sqrt(np.sum((baseline-values)**2)/values.shape[0]))
+        hist, bin_edges = np.histogram(RSE,1000,(-1,100))
+        hist = np.cumsum(hist)
+        print(bin_edges.shape)
+        bin_edges = bin_edges[range(1,bin_edges.shape[0])]
+        print(hist.shape)
+        hist = hist/values.shape[0]*100
+        np.savetxt(filename, np.column_stack((bin_edges,hist)))
+        return bin_edges, hist
 

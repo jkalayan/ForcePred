@@ -87,6 +87,7 @@ class Converter(object):
             mat_F = np.reshape(np.vstack(mat_F), (n_structures,_NC2))
             molecule.mat_F = mat_F
             molecule.mat_NRF = self.mat_NRF
+            molecule.mat_r = self.mat_r
             #print(molecule.mat_F.shape)
             #print(molecule.mat_NRF.shape)
 
@@ -95,8 +96,8 @@ class Converter(object):
                     'number of coords.')
 
     def get_NRF(zA, zB, r):
-        #return zA * zB * Converter.au2kcalmola / (r ** 2)
-        return zA * zB / (r ** 2) 
+        return zA * zB * Converter.au2kcalmola / (r ** 2)
+        #return zA * zB / (r ** 2) 
         #return 1 / (r ** 2) 
 
     def get_r(coordsA, coordsB):
@@ -217,6 +218,19 @@ class Converter(object):
         other_rotated = np.dot(other_translated, _U)
         return other_rotated, _U
 
+    def translate_coords(coords, atoms):
+        n_atoms = len(atoms)
+        masses = np.array([Converter._ZM[a] for a in atoms])
+        _PA, _MI, com = Converter.get_principal_axes(coords, masses)
+        c_translated = np.zeros((n_atoms,3))
+        c_rotated = np.zeros((n_atoms,3))
+        for i in range(n_atoms):
+            c_translated[i] = coords[i] - com
+            for j in range(3):
+                c_rotated[i][j] = np.dot(c_translated[i], _PA[j])
+        return c_translated
+        #return c_rotated
+
     def rotate_forces(forces, coords, masses, n_atoms):
         _PA, _MI, com = Converter.get_principal_axes(coords, masses)
         n_f_rotated = np.zeros((n_atoms,3))
@@ -268,25 +282,45 @@ class Converter(object):
         molecule.rotated_coords = molecule.get_3D_array(
                 molecule.rotated_coords)
 
+    def get_r_from_NRF(_NRF, atoms):
+        rs = np.zeros_like(_NRF)
+        n_atoms = len(atoms)
+        n = -1
+        for i in range(n_atoms):
+            zA = atoms[i]
+            for j in range(i):
+                n += 1
+                zB = atoms[j]
+                r = ((zA * zB) / _NRF[n]) ** 0.5
+                rs[n] = r
+        return rs
+
+
     def get_coords_from_NRF(_NRF, atoms, coords, scale, scale_min):
 
         n_atoms = len(atoms)
         #print(_NRF)
-        scale_NRF = _NRF / np.amax(scale)
-        scale_min_NRF = _NRF / np.amin(scale_min)
+        #scale_NRF = _NRF / np.amax(scale)
+        #scale_min_NRF = _NRF / np.amin(scale_min)
+        scale_NRF = _NRF / scale
+        scale_min_NRF = _NRF / scale_min
         #r_min = (1 / scale) ** 0.5
         #r_max = (1 / scale_min) ** 0.5
 
-        #print(scale_NRF)
-        #print(scale_min_NRF)
+        #print('scale_NRF', scale_NRF)
+        #print('scale_NRF_min', scale_min_NRF)
         #print(coords)
         n = -1
-        for i in range(n_atoms-1):
+        for i in range(n_atoms):
+        #for i in range(n_atoms-1):
             zA = atoms[i]
-            for j in range(i+1, n_atoms):
+            for j in range(i):
+            #for j in range(i+1, n_atoms):
                 n += 1
                 zB = atoms[j]
                 r = Converter.get_r(coords[i], coords[j])
+                #r_min = ((zA * zB) / scale) ** 0.5
+                #r_max = ((zA * zB) / scale_min) ** 0.5
                 r_min = ((zA * zB) / scale[n]) ** 0.5
                 r_max = ((zA * zB) / scale_min[n]) ** 0.5
                 #print(i, j, n)
@@ -302,7 +336,8 @@ class Converter(object):
                     coords2 = coords[j]
                     v = coords2 - coords1
                     new_r = s #use max or min value
-                    #print('\t', r, new_r)
+                    #print(n+1, ':', i+1, j+1, ':', zA, zB, ':', 
+                            #r_min, r_max, r, new_r)
                     u = v / r
                     new_coords = coords1 + new_r * u
                     coords[j] = new_coords

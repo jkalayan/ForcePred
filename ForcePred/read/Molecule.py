@@ -72,9 +72,9 @@ class Molecule(object):
                     (unconserved, self.coords.shape))
             print('translations {}'.format(translations))
             print('rotations {}'.format(rotations))
-            Molecule.remove_variants(self, unconserved)
-            print('New dataset shape is', self.coords.shape, 
-                    self.forces.shape, self.energies.shape)
+            #Molecule.remove_variants(self, unconserved)
+            #print('New dataset shape is', self.coords.shape, 
+                    #self.forces.shape, self.energies.shape)
 
     def remove_variants(self, unconserved):
         for s in unconserved:
@@ -83,14 +83,14 @@ class Molecule(object):
             if hasattr(self, 'energies'):
                 self.energies = np.delete(self.energies, s, axis=0)
 
-    def make_train_test(molecule, variable):
+    def make_train_test(molecule, variable, split):
         '''Split input data into training and test sets. Data is 
         ordered by a particular variable, outputted are lists of
         indices for each set.'''
         sorted_i = np.argsort(variable)
         _Nstructures = len(variable)
-        _Ntrain = int(_Nstructures / 20) #4
-        print(_Nstructures, _Ntrain)
+        _Ntrain = int(_Nstructures / split) #4
+        print(_Nstructures, _Ntrain, split)
         #a = np.array(range(0,_Nstructures))
         a = sorted_i
         b = np.where(a % int(_Nstructures/_Ntrain+1),-1,a)
