@@ -220,6 +220,33 @@ class Network(object):
         #print(np.array(all_recomp_forces).shape)
         return np.array(all_recomp_forces).reshape(-1,n_atoms,3)
 
+    def get_recomposed_charges(all_coords, all_prediction, n_atoms, _NC2):
+        '''Take pairwise decomposed charges and convert them back into 
+        atomic charges.'''
+        all_recomp_charges = []
+        for coords, prediction in zip(all_coords, all_prediction):
+            eij = np.zeros((n_atoms, n_atoms))
+                #normalised interatomic vectors
+            q_list = []
+            for i in range(1,n_atoms):
+                for j in range(i):
+                    eij[i,j] = 1
+                    eij[j,i] = -eij[i,j]
+                    q_list.append([i,j])
+            _T = np.zeros((n_atoms, _NC2))
+            for i in range(int(_T.shape[0])):
+                for k in range(len(q_list)):
+                    if q_list[k][0] == i:
+                        _T[range(i, (i+1)), k] = \
+                                eij[q_list[k][0],q_list[k][1]]
+                    if q_list[k][1] == i:
+                        _T[range(i, (i+1)), k] = \
+                                eij[q_list[k][1],q_list[k][0]]
+            recomp_charges = np.zeros((n_atoms))
+            recomp_charges = np.dot(_T, prediction.flatten())
+            all_recomp_charges.append(recomp_charges)
+        return np.array(all_recomp_charges).reshape(-1,n_atoms)
+
     def get_scaled(a, b, x_min, x_max, x):
         x_norm = (b - a) * (x - x_min) / (x_max - x_min) + a
         return x_norm
@@ -245,12 +272,12 @@ class Network(object):
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
 
-        scale_NRF = 9609.948466619555 #network.scale_NRF # 
-        scale_NRF_min = 12.29385814543981 #network.scale_NRF_min #
-        scale_NRF_all = 0 #network.scale_NRF_all 
-        scale_NRF_min_all = 0 #network.scale_NRF_min_all
-        scale_F = 15808.277117988835 #network.scale_F # 
-        scale_F_min = 0 #network.scale_F_min #
+        scale_NRF = network.scale_NRF #29.10017376084781# 9609.948466619555 # 
+        scale_NRF_min = network.scale_NRF_min # 0.03589677731052864 #12.29385814543981 #
+        scale_NRF_all = network.scale_NRF_all #0 #
+        scale_NRF_min_all = network.scale_NRF_min_all #0 #
+        scale_F = network.scale_F #18101.965828195564# 15808.277117988835 # 
+        scale_F_min = network.scale_F_min #0 #
         #scale_F_all = network.scale_F_all 
         #scale_F_min_all = network.scale_F_min_all 
         #print(scale_NRF, scale_NRF_min, scale_F)
@@ -268,11 +295,15 @@ class Network(object):
         f1 = open('nn-NRF.txt', 'ab')
         f2 = open('nn-decomp-force.txt', 'ab')
         #f3 = open('nn-E.txt', 'ab')
+        open('nn-E.txt', 'w').close()
+        open('nn-KE.txt', 'w').close()
+        open('nn-T.txt', 'w').close()
         #coords_prev = coords_init
         coords_prev = Converter.translate_coords(
                 coords_init, atoms)
         coords_current = coords_init
         _E_prev = 0
+        temp = 2
         for i in range(nsteps):
             #print('\t', i)
             #print('NVE coords', coords_current.shape, coords_current)
@@ -338,16 +369,23 @@ class Network(object):
             #print('shape f', recomp_forces.shape)
             '''
 
-            coords_next, dE, v = MM.calculate_verlet_step(coords_current, 
-                    coords_prev, recomp_forces[0], masses, timestep)
-            steps = MM.calculate_step(coords_current, coords_prev, 
-                    recomp_forces[0], timestep, masses, timestep)
+            #print(i, temp)
+            coords_next, dE, v, current_T, _KE = \
+                    MM.calculate_verlet_step(coords_current, 
+                    coords_prev, recomp_forces[0], masses, timestep, temp)
+            #steps = MM.calculate_step(coords_current, coords_prev, 
+                    #recomp_forces[0], timestep, masses, timestep)
+                    #ismaeel's code
             _E = _E_prev - dE
 
+            #if i%(nsteps/100) == 0 and temp < 1:
+                #temp += 0.01
             #if i%(nsteps/100000) == 0:
             np.savetxt(f1, mat_NRF)
             np.savetxt(f2, prediction)
             open('nn-E.txt', 'a').write('{}\n'.format(_E))#.close()
+            open('nn-KE.txt', 'a').write('{}\n'.format(_KE))#.close()
+            open('nn-T.txt', 'a').write('{}\n'.format(current_T))#.close()
             Writer.write_xyz([coords_current], molecule.atoms, 
                 'nn-coords.xyz', 'a', i)
             Writer.write_xyz(recomp_forces, molecule.atoms, 

@@ -6,6 +6,7 @@ into pair-wise and nuclear repulsive forces respectively.
 '''
 
 import numpy as np
+#from ..network.Network import Network
 
 class Converter(object):
     '''
@@ -26,6 +27,7 @@ class Converter(object):
     m2ang = 1e10
     fsec2sec = 1e-15
     _NA = 6.02214076e23
+    kB = 1.38064852e-23 
     au2kg = 1.66053907e-27
     _ZM = {1:1.008, 6:12.011, 8:15.999}
     _ZSymbol = {1:'H', 6:'C', 8:'O'}
@@ -38,6 +40,8 @@ class Converter(object):
         self.mat_r = None
         self.mat_NRF = None
         self.get_interatomic_forces(molecule)
+        if hasattr(molecule, 'charges'):
+            self.get_interatomic_charges(molecule)
 
     def __str__(self):
         return ('\nN structures: %s,' % (len(self.coords)))
@@ -91,6 +95,47 @@ class Converter(object):
             #print(molecule.mat_F.shape)
             #print(molecule.mat_NRF.shape)
 
+        else:
+            raise ValueError('Number of atoms does not match '\
+                    'number of coords.')
+
+    def get_interatomic_charges(self):
+        if len(self.atoms) == len(self.coords[0]):
+            n_atoms = len(self.atoms)
+            _NC2 = int(n_atoms * (n_atoms-1)/2)
+            n_structures = len(self.coords)
+            self.mat_NRF = np.zeros((n_structures, _NC2))
+            self.mat_bias = np.zeros((n_structures, n_atoms, _NC2))
+            mat_Q = [] 
+            for s in range(n_structures):
+                _N = -1
+                for i in range(n_atoms):
+                    zi = self.atoms[i]
+                    for j in range(i):
+                        _N += 1
+                        zj = self.atoms[j]
+                        r = Converter.get_r(self.coords[s][i], 
+                                self.coords[s][j])
+                        if i != j:
+                            self.mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
+                            self.mat_bias[s,i,_N] = self.mat_NRF[s,_N] #1 #
+                            self.mat_bias[s,j,_N] = -self.mat_bias[s,i,_N]
+
+                charges2 = self.charges[s].reshape(n_atoms)
+                _Q = np.matmul(np.linalg.pinv(self.mat_bias[s]), charges2)
+                #'''##### if using scale factor, need to remove.
+                _N2 = -1
+                for i in range(n_atoms):
+                    for j in range(i):
+                        _N2 += 1
+                        _Q[_N2] = _Q[_N2] * self.mat_NRF[s,_N2]
+                #'''#####
+                mat_Q.append(_Q)
+
+            mat_Q = np.reshape(np.vstack(mat_Q), (n_structures,_NC2))
+            self.mat_Q = mat_Q
+            recomp_Q = Network.get_recomposed_charges(self.coords, 
+                    self.mat_Q, n_atoms, _NC2)
         else:
             raise ValueError('Number of atoms does not match '\
                     'number of coords.')

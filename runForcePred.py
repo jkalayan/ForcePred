@@ -37,47 +37,55 @@ def run_force_pred(input_files='input_files',
     if list_files:
         input_files = open(list_files).read().split()
     #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
+    #print(molecule.charges)
+    #print(molecule.charges.shape)
+    #Converter.get_interatomic_charges(molecule)
+    #sys.exit()
     #OPTParser(input_files, molecule, opt=True) #read in FCEZ for opt
     '''
     AMBLAMMPSParser('molecules.prmtop', '1md.mdcrd',
         coord_files, force_files, energy_files, molecule)
     '''
 
+    #NPParser(atom_file, coord_files, force_files, energy_files, molecule)
+
     '''
     NPParser('types_z', 
             ['train1_aspirin_coordinates'], 
-            ['train1_aspirin_forces'], molecule)
+            ['train1_aspirin_forces'], [], molecule)
     '''
     '''
     NPParser('types_z', 
             ['train50000_aspirin_coordinates'], 
-            ['train50000_aspirin_forces'], molecule)
+            ['train50000_aspirin_forces'], [], molecule)
     '''
     '''
     AMBERParser('molecules.prmtop', '1md.mdcrd', 'ascii.frc', 
             molecule)
     '''
 
-    #'''
+    '''
     XYZParser(atom_file, coord_files, force_files, 
             energy_files, molecule)
-    #'''
+    '''
 
 
     '''
     Writer.write_xyz(molecule.coords, molecule.atoms, 'qm-coords.xyz', 'w')
     Writer.write_xyz(molecule.forces, molecule.atoms, 'qm-forces.xyz', 'w')
     np.savetxt('qm-energies.txt', molecule.energies)
+    np.savetxt('qm-charges.txt', molecule.charges)
     '''
 
-    get_decomp = True
+
+    get_decomp = False
     if get_decomp:
         print(molecule)
         print('check and get force decomp')
         Molecule.check_force_conservation(molecule) #
         Converter(molecule) #get pairwise forces
 
-
+    #sys.exit()
 
 
     get_rotate = False
@@ -122,12 +130,51 @@ def run_force_pred(input_files='input_files',
     get_train_from_dih = False
     if get_train_from_dih:
         dihedrals = Binner()
-        list_dih = [[1, 2, 3, 6], [3, 2, 1, 7],
-                [2, 1, 7, 10]]
+        #list_dih = [[1, 2, 3, 6], [3, 2, 1, 7],
+                #[2, 1, 7, 10]]
         '''
         list_dih = [[1,2,3,6], [3,2,1,7], [2,1,7,10], [4,2,3,6], [5,2,3,6],
                 [4,2,1,7], [5,2,1,7], [4,2,1,8], [5,2,1,8], [4,2,1,9], 
                 [5,2,1,9], [8,1,2,3], [9,1,2,3], [8,1,7,10], [9,1,7,10]]
+        '''
+        list_dih = []
+        n_atoms = len(molecule.atoms)
+        for i in range(1, n_atoms+1):
+            for j in range(i):
+                for k in range(j):
+                    for l in range(k):
+                        list_dih.append([i,j,k,l])
+        #print(list_dih)
+        dihedrals.get_dih_pop(molecule.coords, list_dih)
+        #print(np.int_(dihedrals.phis.T)) 
+        #print(dihedrals.phis.shape, dihedrals.phis.T.shape)
+
+        u, indices = np.unique(np.int_(dihedrals.phis), axis=0, 
+                return_index=True)
+        #print(u)
+        #print(indices)
+        train_phis = np.unique(indices)
+        print(train_phis)
+
+        test_phis = []
+        for i in range(dihedrals.phis.shape[0]):
+            if i not in train_phis:
+                test_phis.append(i)
+            else:
+                continue
+
+        print(test_phis)
+        train_phis = np.array(train_phis)
+        test_phis = np.array(test_phis)
+        print('train_phis', train_phis.shape, 'test_phis', test_phis.shape)
+
+        train_NRF = np.take(molecule.mat_NRF, train_phis, axis=0)
+        #_NRF = np.take(molecule.mat_NRF, test_phis, axis=0)
+        print(train_NRF.shape)
+
+        #sys.exit()
+
+
         '''
         dihedrals.get_dih_pop(molecule.coords, list_dih)
 
@@ -160,12 +207,11 @@ def run_force_pred(input_files='input_files',
         train_phis = np.array(train_phis)
         test_phis = np.array(test_phis)
         print('train_phis', train_phis.shape, 'test_phis', test_phis.shape)
+        '''
 
-                
 
-
-    run_net = True
-    split = 2 #2 4 5 20 52 260
+    run_net = False
+    split = 5 #2 4 5 20 52 260
     if run_net:
         print('get NN')
         Molecule.make_train_test(molecule, molecule.energies.flatten(), 
@@ -174,16 +220,16 @@ def run_force_pred(input_files='input_files',
         #molecule.train = train_phis
         #molecule.test = test_phis
         network = Network() #initiate network class
-        ###Network.get_variable_depth_model(network, molecule) #train NN
-        nsteps=1000
+        Network.get_variable_depth_model(network, molecule) #train NN
+        nsteps=5000
         mm = Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
 
 
-    print('checking mm forces')
-    mm.coords = mm.get_3D_array([mm.coords])
-    mm.forces = mm.get_3D_array([mm.forces]) 
-    mm.energies = np.array(mm.energies)
-    mm.check_force_conservation()
+        print('checking mm forces')
+        mm.coords = mm.get_3D_array([mm.coords])
+        mm.forces = mm.get_3D_array([mm.forces]) 
+        mm.energies = np.array(mm.energies)
+        mm.check_force_conservation()
     #sys.exit()
 
     '''
@@ -257,13 +303,13 @@ def run_force_pred(input_files='input_files',
 
         Plotter.xy_scatter([np.take(phis_1, train), mm_phis_1], 
                 [np.take(phis_2, train), mm_phis_2], 
-                ['train', 'mm'], ['k', 'r'], 
+                ['train', 'nn-mm'], ['k', 'r'], 
                 '$\phi_1$', '$\phi_2$', 'train-xy-12.png')
         Plotter.xy_scatter([np.take(phis_1, test)], [np.take(phis_2, test)], 
                 [''], ['k'], '$\phi_1$', '$\phi_2$', 'test-xy-12.png')
         Plotter.xy_scatter([np.take(phis_1, train), mm_phis_1], 
                 [np.take(phis_3, train), mm_phis_3], 
-                ['train', 'mm'], ['k', 'r'], 
+                ['train', 'nn-mm'], ['k', 'r'], 
                 '$\phi_1$', '$\phi_3$', 'train-xy-13.png')
         Plotter.xy_scatter([np.take(phis_1, test)], [np.take(phis_3, test)], 
                 [''], ['k'], '$\phi_1$', '$\phi_3$', 'test-xy-13.png')
@@ -357,25 +403,52 @@ def run_force_pred(input_files='input_files',
 
 
 
+    mm_molecule = Molecule()
+    XYZParser(atom_file, [coord_files[0]], [force_files[0]], 
+            [energy_files[0]], mm_molecule)
+    Converter(mm_molecule) #get pairwise forces
 
+    qm_molecule = Molecule()
+    XYZParser(atom_file, [coord_files[1]], [force_files[1]], 
+            [energy_files[1]], qm_molecule)
+    Converter(qm_molecule) #get pairwise forces
 
-
+    print('compare mm and qm decomp forces')
+    print(range(len(mm_molecule.atoms)))
+    print(mm_molecule.atoms)
+    _N = -1
+    for i in range(len(mm_molecule.atoms)):
+        for j in range(i):
+            _N += 1
+            print(_N, i, j, '-', mm_molecule.atoms[i], mm_molecule.atoms[j])
+            Plotter.xy_scatter([mm_molecule.mat_F.T[_N]], 
+                    [qm_molecule.mat_F.T[_N]], 
+                    ['mm vs qm'], ['k'], 
+                    'mm decompF / kcal mol$^{-1}\ \AA^{-1}$', 
+                    'qm decompF / kcal mol$^{-1}\ \AA^{-1}$', 
+                    'mm_vs_qm_decomp_forces_{}_{}{}'.format(_N, 
+                    mm_molecule.atoms[i], mm_molecule.atoms[j]))
 
 
     '''
-    #for h in range(len(decomp)):
-    for h in range(1):
-        n = -1
-        for i in range(len(molecule.atoms)):
-            zA = molecule.atoms[i]
-            for j in range(i):
-                n += 1
-                zB = molecule.atoms[j]
-                _NRF = mat_NRF[h][n]
-                #r = molecule.mat_r[h][n]
-                #r_recomp = (zA * zB / _NRF) ** 0.5
-                #print(n+1, '-', i+1, j+1, '-', zA, zB, '-', decomp[h][n])
-                #print('\t', _NRF, r, r_recomp)
+    print('compare mm and qm energies')
+    Plotter.xy_scatter([mm_molecule.energies], [qm_molecule.energies], 
+            ['mm vs qm'], ['k'], 
+            'mm Etot / kcal mol$^{-1}$', 'qm Etot / kcal mol$^{-1}$', 
+            'mm_vs_qm_energies')
+
+    print('check mm and qm dihedrals are the same')
+    mm_dihedrals = Binner()
+    qm_dihedrals = Binner()
+    list_dih = [[1, 2, 3, 6], [3, 2, 1, 7],
+            [2, 1, 7, 10]]
+    mm_dihedrals.get_dih_pop(mm_molecule.coords, list_dih)
+    qm_dihedrals.get_dih_pop(mm_molecule.coords, list_dih)
+
+    Plotter.xy_scatter([mm_dihedrals.phis.T[1]], [mm_dihedrals.phis.T[1]], 
+            ['mm vs qm'], ['k'], 
+            'mm OCCO dih', 'qm OCCO dih', 
+            'mm_vs_qm_dihs')
     '''
 
 

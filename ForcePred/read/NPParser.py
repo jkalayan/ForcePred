@@ -12,17 +12,19 @@ class NPParser(object):
     '''
     '''
 
-    def __init__(self, file_atoms, files_coords, files_forces, molecule):
+    def __init__(self, file_atoms, files_coords, files_forces, 
+            files_energies, molecule):
         self.file_atoms = file_atoms
         self.files_coords = files_coords
         self.files_forces = files_forces
         self.filenames = [file_atoms, files_coords, files_forces]
         self.atoms = []
-        #self.energies = []
+        self.energies = []
         self.coords = []
         self.forces = []
         self.sorted_i = None
         self.iterate_atoms_file(file_atoms)
+        self.energies = self.iterate_energies(files_energies, self.energies)
         self.coords = self.iterate_files(files_coords, self.coords)
         self.forces = self.iterate_files(files_forces, self.forces)
         molecule.get_ZCFE(self) #populate molecule class
@@ -38,6 +40,13 @@ class NPParser(object):
         input_ = open(file_atoms, 'r')
         for atom in input_:
             self.atoms.append(int(atom))
+
+    def iterate_energies(self, filename, var):
+        n_atoms = len(self.atoms)
+        for filename in filename:
+            v = np.reshape(np.loadtxt(filename), (-1,1))
+            var.append(v)
+        return var
 
     def iterate_files(self, filename, var):
         n_atoms = len(self.atoms)

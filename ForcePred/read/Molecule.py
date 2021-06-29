@@ -35,6 +35,10 @@ class Molecule(object):
         self.forces = self.get_3D_array(other.forces)
         if hasattr(other, 'energies'):
             self.energies = self.get_2D_array(other.energies)
+        if hasattr(other, 'charges'):
+            self.charges = self.get_2D_array(other.charges).reshape(
+                    -1,len(self.atoms))
+            #self.charges = self.get_3D_array(other.charges)
 
     def check_force_conservation(self):
         ''' Ensure that forces in each structure translationally and 
@@ -72,9 +76,9 @@ class Molecule(object):
                     (unconserved, self.coords.shape))
             print('translations {}'.format(translations))
             print('rotations {}'.format(rotations))
-            #Molecule.remove_variants(self, unconserved)
-            #print('New dataset shape is', self.coords.shape, 
-                    #self.forces.shape, self.energies.shape)
+            Molecule.remove_variants(self, unconserved)
+            print('New dataset shape is', self.coords.shape, 
+                    self.forces.shape, self.energies.shape)
 
     def remove_variants(self, unconserved):
         for s in unconserved:

@@ -46,6 +46,7 @@ class OPTParser(object):
         self.std_coords = []
         self.forces = []
         self.energies = []
+        self.charges = []
         self.sorted_i = None
         self.iterate_files(self.filenames, opt)
         molecule.get_ZCFE(self) #populate molecule class
@@ -64,17 +65,18 @@ class OPTParser(object):
         for filename in filenames:
             print(filename)
             input_ = open(filename, 'r')
-            inp_coord, std_coord, force, energy = None, None, None, None
+            inp_coord, std_coord, force, energy, charges = \
+                    None, None, None, None, None
             for line in input_:
                 #self.get_counts(line)
                 self.get_counts2(line, input_)
                 if self.natoms != None:
                     if 'Input orientation:' in line:
-                        inp_coord = self.clean(self.extract(4, input_)) #\
+                        inp_coord = self.clean(self.extract(4, input_), 3) #\
                                 #* Converter.au2Ang
                         #print('inp_coord', inp_coord.shape)
                     if 'Standard orientation:' in line:
-                        std_coord = self.clean(self.extract(4, input_)) #\
+                        std_coord = self.clean(self.extract(4, input_), 3) #\
                                 #* Converter.au2Ang
                         #print('std_coord', std_coord.shape)
                     if 'SCF Done:' in line:
@@ -82,9 +84,16 @@ class OPTParser(object):
                                 * Converter.Eh2kcalmol
                         #print('e', energy)
                     if 'Axes restored to original set' in line:
-                        force = self.clean(self.extract(4, input_)) \
+                        force = self.clean(self.extract(4, input_), 3) \
                                 * Converter.au2kcalmola
                         #print('f', force.shape)
+                    if 'Mulliken charges:' in line:
+                        charges = self.clean(self.extract(1, input_), 1)
+                    if 'ESP charges:' in line: #override with ESP
+                        charges = self.clean(self.extract(1, input_), 1)
+                        #charges = np.repeat(charges.reshape(-1,1), 3)
+                        #print(charges)
+
                     #only save info if structure is optimised
                     save_data = False
                     if opt and 'Optimization completed' in line:
@@ -97,6 +106,7 @@ class OPTParser(object):
                         self.std_coords.append(std_coord)
                         self.forces.append(force)
                         self.energies.append(energy)
+                        self.charges.append(charges)
             #print()
             sys.stdout.flush()
             if self.atoms == self.new_atoms:
@@ -133,10 +143,10 @@ class OPTParser(object):
         return (list(islice(input_, padding + 
                 self.natoms))[-self.natoms:])
 
-    def clean(self, raw):
-        cleaned = np.empty(shape=[self.natoms, 3])
+    def clean(self, raw, num_cols):
+        cleaned = np.empty(shape=[self.natoms, num_cols])
         for i, atom in enumerate(raw):
-            cleaned[i] = atom.strip('\n').split()[-3:]
+            cleaned[i] = atom.strip('\n').split()[-num_cols:]
         #get the list of nuclear charges in a molecule
         if len(self.atoms) == 0:
             self.get_atoms(raw, self.atoms)
