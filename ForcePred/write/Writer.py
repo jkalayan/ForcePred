@@ -58,4 +58,7 @@ class Writer(object):
         for i in list_:
             outfile.write('{}\n'.format(i))
         outfile.close()
-       
+    
+    def write_csv(list_, filename, header):
+        np.savetxt('{}.csv'.format(filename), np.column_stack(list_), 
+                delimiter=',', header=header, fmt='%.3f')

@@ -64,10 +64,10 @@ def run_force_pred(input_files='input_files',
             molecule)
     '''
 
-    '''
+    #'''
     XYZParser(atom_file, coord_files, force_files, 
             energy_files, molecule)
-    '''
+    #'''
 
 
     '''
@@ -77,16 +77,18 @@ def run_force_pred(input_files='input_files',
     np.savetxt('qm-charges.txt', molecule.charges)
     '''
 
+    sys.stdout.flush()
 
-    get_decomp = False
+    get_decomp = True
     if get_decomp:
         print(molecule)
         print('check and get force decomp')
-        Molecule.check_force_conservation(molecule) #
+        unconserved = Molecule.check_force_conservation(molecule) #
         Converter(molecule) #get pairwise forces
 
     #sys.exit()
 
+    sys.stdout.flush()
 
     get_rotate = False
     if get_rotate:
@@ -94,7 +96,7 @@ def run_force_pred(input_files='input_files',
         Converter.get_rotated_forces(molecule)
         molecule.forces = molecule.rotated_forces
         molecule.coords = molecule.rotated_coords
-        Molecule.check_force_conservation(molecule) #
+        unconserved = Molecule.check_force_conservation(molecule) #
         Converter(molecule) # get pairwise forces
 
         print(np.amax(molecule.mat_NRF), np.amin(molecule.mat_NRF))
@@ -105,6 +107,7 @@ def run_force_pred(input_files='input_files',
         Writer.write_xyz(molecule.rotated_forces, 
                 molecule.atoms, 'rot_forces.xyz', 'w')
 
+    sys.stdout.flush()
     #print(molecule.mat_NRF[0])
     #Converter.get_coords_from_NRF(molecule.mat_NRF[0]/33, molecule.atoms,
             #molecule.coords[0], 33)
@@ -209,8 +212,9 @@ def run_force_pred(input_files='input_files',
         print('train_phis', train_phis.shape, 'test_phis', test_phis.shape)
         '''
 
+    sys.stdout.flush()
 
-    run_net = False
+    run_net = True
     split = 5 #2 4 5 20 52 260
     if run_net:
         print('get NN')
@@ -221,7 +225,7 @@ def run_force_pred(input_files='input_files',
         #molecule.test = test_phis
         network = Network() #initiate network class
         Network.get_variable_depth_model(network, molecule) #train NN
-        nsteps=5000
+        nsteps=500000
         mm = Network.run_NVE(network, molecule, timestep=0.5, nsteps=nsteps)
 
 
@@ -229,8 +233,9 @@ def run_force_pred(input_files='input_files',
         mm.coords = mm.get_3D_array([mm.coords])
         mm.forces = mm.get_3D_array([mm.forces]) 
         mm.energies = np.array(mm.energies)
-        mm.check_force_conservation()
+        unconserved = mm.check_force_conservation()
     #sys.exit()
+    sys.stdout.flush()
 
     '''
     NPParser('types_z', 
@@ -249,7 +254,7 @@ def run_force_pred(input_files='input_files',
 
     #AMBERParser('molecules.prmtop', '1md.mdcrd', 'ascii.frc', 
             #molecule)
-    #Molecule.check_force_conservation(molecule)
+    #unconserved = Molecule.check_force_conservation(molecule)
     #Converter(molecule)
     #print(molecule.mat_F)
     #Writer.write_xyz(molecule.coords, molecule.atoms, 
@@ -401,34 +406,67 @@ def run_force_pred(input_files='input_files',
             '$\Phi$', 'decomp F', 'test-dih-OCCO.png')
     '''
 
+    mm_qm_comparison = False
+    if mm_qm_comparison:
+        print('read and check mm forces')
+        mm_molecule = Molecule()
+        XYZParser(atom_file, [coord_files[0]], [force_files[0]], 
+                [energy_files[0]], mm_molecule)
+        print(datetime.now() - startTime)
+        Converter.get_rotated_forces(mm_molecule)
+        mm_molecule.forces = mm_molecule.rotated_forces
+        mm_molecule.coords = mm_molecule.rotated_coords
+        mm_unconserved = Molecule.check_force_conservation(mm_molecule) #
+        print(datetime.now() - startTime)
+        sys.stdout.flush()
 
+        print('read and check qm forces')
+        qm_molecule = Molecule()
+        XYZParser(atom_file, [coord_files[1]], [force_files[1]], 
+                [energy_files[1]], qm_molecule)
+        print(datetime.now() - startTime)
+        Converter.get_rotated_forces(qm_molecule)
+        qm_molecule.forces = qm_molecule.rotated_forces
+        qm_molecule.coords = qm_molecule.rotated_coords
+        qm_unconserved = Molecule.check_force_conservation(qm_molecule) #
+        print(datetime.now() - startTime)
+        sys.stdout.flush()
 
-    mm_molecule = Molecule()
-    XYZParser(atom_file, [coord_files[0]], [force_files[0]], 
-            [energy_files[0]], mm_molecule)
-    Converter(mm_molecule) #get pairwise forces
+        print('remove unconserved')
+        unconserved = np.concatenate([mm_unconserved, qm_unconserved])
+        if len(unconserved) > 0:
+            unconserved = np.unique(unconserved)
+            mm_molecule.remove_variants(unconserved)
+            qm_molecule.remove_variants(unconserved)
+        print('unconserved', unconserved)
+        print('get mm decomp forces')
+        Converter(mm_molecule) #get pairwise forces
+        print(datetime.now() - startTime)
+        sys.stdout.flush()
+        print('get qm decomp forces')
+        Converter(qm_molecule) #get pairwise forces
+        print(datetime.now() - startTime)
+        sys.stdout.flush()
 
-    qm_molecule = Molecule()
-    XYZParser(atom_file, [coord_files[1]], [force_files[1]], 
-            [energy_files[1]], qm_molecule)
-    Converter(qm_molecule) #get pairwise forces
-
-    print('compare mm and qm decomp forces')
-    print(range(len(mm_molecule.atoms)))
-    print(mm_molecule.atoms)
-    _N = -1
-    for i in range(len(mm_molecule.atoms)):
-        for j in range(i):
-            _N += 1
-            print(_N, i, j, '-', mm_molecule.atoms[i], mm_molecule.atoms[j])
-            Plotter.xy_scatter([mm_molecule.mat_F.T[_N]], 
-                    [qm_molecule.mat_F.T[_N]], 
-                    ['mm vs qm'], ['k'], 
-                    'mm decompF / kcal mol$^{-1}\ \AA^{-1}$', 
-                    'qm decompF / kcal mol$^{-1}\ \AA^{-1}$', 
-                    'mm_vs_qm_decomp_forces_{}_{}{}'.format(_N, 
-                    mm_molecule.atoms[i], mm_molecule.atoms[j]))
-
+        print('compare mm and qm decomp forces')
+        print(mm_molecule.coords.shape, qm_molecule.coords.shape)
+        print(range(len(mm_molecule.atoms)))
+        print(mm_molecule.atoms)
+        _N = -1
+        for i in range(len(mm_molecule.atoms)):
+            for j in range(i):
+                _N += 1
+                print(_N, i, j, '-', mm_molecule.atoms[i], 
+                        mm_molecule.atoms[j])
+                Plotter.xy_scatter([mm_molecule.mat_F.T[_N]], 
+                        [qm_molecule.mat_F.T[_N]], 
+                        ['mm vs qm'], ['k'], 
+                        'mm decompF / kcal mol$^{-1}\ \AA^{-1}$', 
+                        'qm decompF / kcal mol$^{-1}\ \AA^{-1}$', 
+                        'mm_vs_qm_decomp_forces_{}_{}{}'.format(_N, 
+                        mm_molecule.atoms[i], mm_molecule.atoms[j]))
+        print(datetime.now() - startTime)
+        sys.stdout.flush()
 
     '''
     print('compare mm and qm energies')

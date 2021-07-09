@@ -15,19 +15,20 @@ class MM(object):
         self.forces = []
 
     def calculate_verlet_step(coords_current, coords_prev, forces, 
-            masses, timestep, temp):
+            masses, timestep, dt, temp):
         '''Calculate coords for next timestep using Verlet
         algorithm. Coords are assumed to be in Angstrom,
         forces in kcal/(mol Ang), mass in amu and time in 
         femtoseconds'''
         _C = coords_current * Converter.ang2m
         _Cprev = coords_prev * Converter.ang2m
-        dt = timestep * Converter.fsec2sec
+        timestep = timestep * Converter.fsec2sec
+        dt = dt * Converter.fsec2sec
         _F = (forces * Converter.kcal2kj * 1000) / \
                 (Converter.ang2m * Converter._NA)
         m = masses * Converter.au2kg
         a = _F / (2 * m)
-        v = ((_C - _Cprev) / dt) + a * dt
+        v = ((_C - _Cprev) / timestep) + a * timestep
         v_scaled, current_T = MM.scale_velocities(v, m, temp, timestep, 0.5)
         #v = v_scaled
         _KE = 0.5 * m * v ** 2
@@ -41,23 +42,8 @@ class MM(object):
         #_Cnew = _C + (((_C - _Cprev) / dt) + a * dt) * dt + a * dt ** 2
         #print(_Cnew)
 
-        dE = dt * np.sum(forces * (v / Converter.ang2m))
+        dE = timestep * np.sum(forces * (v / Converter.ang2m))
         return _Cnew / Converter.ang2m, dE, v, current_T, sum_KE
-
-
-    def scale_velocities(v, m, target_T, dt, tau):
-        '''Scale velocities using Berendsen thermostat
-        https://www2.mpip-mainz.mpg.de/~andrienk/journal_club/thermostats.pdf
-        Don't use leapfrog i.e. dt/2
-        '''
-        current_T = (m * v ** 2) / (3 * Converter.kB)
-        #print('ave_current_T', current_T, np.average(current_T))
-        scale_factor = (target_T / current_T) ** 0.5 #simple velocity scaling
-        #scale_factor = (1 + dt / tau * (target_T / current_T - 1)) ** 0.5
-                #choose how often velocities are scaled with tau value
-        v_scaled = v * scale_factor
-        return v_scaled, np.average(current_T)
-
 
     #def calculate_step(coords,coords_prev,forces,delta_t,types,timestep):
     def calculate_step(coords,coords_prev,forces,delta_t,weights,timestep):
@@ -77,5 +63,18 @@ class MM(object):
         #print('steps', steps)
         steps = steps*10**10 #convert back to angstroms
         return steps
+
+    def scale_velocities(v, m, target_T, dt, tau):
+        '''Scale velocities using Berendsen thermostat
+        https://www2.mpip-mainz.mpg.de/~andrienk/journal_club/thermostats.pdf
+        Don't use leapfrog i.e. dt/2
+        '''
+        current_T = (m * v ** 2) / (3 * Converter.kB)
+        #print('ave_current_T', current_T, np.average(current_T))
+        scale_factor = (target_T / current_T) ** 0.5 #simple velocity scaling
+        #scale_factor = (1 + dt / tau * (target_T / current_T - 1)) ** 0.5
+                #choose how often velocities are scaled with tau value
+        v_scaled = v * scale_factor
+        return v_scaled, np.average(current_T)
 
 

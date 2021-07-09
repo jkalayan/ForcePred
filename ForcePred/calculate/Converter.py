@@ -99,13 +99,33 @@ class Converter(object):
             raise ValueError('Number of atoms does not match '\
                     'number of coords.')
 
-    def get_interatomic_charges(self):
+    def get_interatomic_charges(self, bias_type='NRF'):
+        '''
+        This function takes molecule coords (C), atomic charges (Q) and 
+        nuclear charges (Z) and decomposes atomic charges with a bias 
+        if selected.
+        Decomposed pairwise charges are recomposed and checked with 
+        original atomic charges to ensure the decomposition scheme is 
+        performed correctly.
+
+        Variables are - 
+
+        self:       molecule object containing ZCFEQ information
+        bias_type:  the bias required for decomposed charges, options are:
+
+                    '1':   No bias (bias=1)
+                    '1/r':  1/r bias
+                    '1/r2': 1/r^2 bias
+                    'NRF':  bias using nuclear repulsive forces (zA zB/r^2)
+                    'r':    r bias
+        '''
         if len(self.atoms) == len(self.coords[0]):
             n_atoms = len(self.atoms)
             _NC2 = int(n_atoms * (n_atoms-1)/2)
             n_structures = len(self.coords)
             self.mat_NRF = np.zeros((n_structures, _NC2))
             self.mat_bias = np.zeros((n_structures, n_atoms, _NC2))
+            self.mat_bias2 = np.zeros((n_structures, _NC2))
             mat_Q = [] 
             for s in range(n_structures):
                 _N = -1
@@ -118,27 +138,74 @@ class Converter(object):
                                 self.coords[s][j])
                         if i != j:
                             self.mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
-                            self.mat_bias[s,i,_N] = self.mat_NRF[s,_N] #1 #
-                            self.mat_bias[s,j,_N] = -self.mat_bias[s,i,_N]
+                            bias = Converter.get_bias(zi, zj, r, bias_type)
+                            if bias_type == 'NRF':
+                                bias = self.mat_NRF[s,_N]
+                            self.mat_bias[s,i,_N] = bias
+                            self.mat_bias[s,j,_N] = -bias
+                            self.mat_bias2[s,_N] = bias
 
                 charges2 = self.charges[s].reshape(n_atoms)
                 _Q = np.matmul(np.linalg.pinv(self.mat_bias[s]), charges2)
-                #'''##### if using scale factor, need to remove.
+                #rescale using bias
                 _N2 = -1
                 for i in range(n_atoms):
                     for j in range(i):
                         _N2 += 1
-                        _Q[_N2] = _Q[_N2] * self.mat_NRF[s,_N2]
-                #'''#####
+                        #_Q[_N2] = _Q[_N2] * self.mat_NRF[s,_N2]
+                        _Q[_N2] = _Q[_N2] * self.mat_bias2[s,_N2]
                 mat_Q.append(_Q)
 
             mat_Q = np.reshape(np.vstack(mat_Q), (n_structures,_NC2))
             self.mat_Q = mat_Q
-            recomp_Q = Network.get_recomposed_charges(self.coords, 
+            recomp_Q = Converter.get_recomposed_charges(self.coords, 
                     self.mat_Q, n_atoms, _NC2)
+            ##check recomp_Q is the same as Q
+            if np.array_equal(np.round(recomp_Q, 1), 
+                    np.round(self.charges, 1)) == False:
+                raise ValueError('Recomposed charges {} do not '\
+                        'equal initial charges {}'.format(
+                        recomp_Q, self.charges))
         else:
             raise ValueError('Number of atoms does not match '\
                     'number of coords.')
+
+    def get_recomposed_charges(all_coords, all_prediction, n_atoms, _NC2):
+        '''Take pairwise decomposed charges and convert them back into 
+        atomic charges.'''
+        all_recomp_charges = []
+        for coords, prediction in zip(all_coords, all_prediction):
+            eij = np.zeros((n_atoms, n_atoms))
+                #normalised interatomic vectors
+            q_list = []
+            for i in range(1,n_atoms):
+                for j in range(i):
+                    eij[i,j] = 1
+                    eij[j,i] = -eij[i,j]
+                    q_list.append([i,j])
+            _T = np.zeros((n_atoms, _NC2))
+            for i in range(int(_T.shape[0])):
+                for k in range(len(q_list)):
+                    if q_list[k][0] == i:
+                        _T[range(i, (i+1)), k] = \
+                                eij[q_list[k][0],q_list[k][1]]
+                    if q_list[k][1] == i:
+                        _T[range(i, (i+1)), k] = \
+                                eij[q_list[k][1],q_list[k][0]]
+            recomp_charges = np.zeros((n_atoms))
+            recomp_charges = np.dot(_T, prediction.flatten())
+            all_recomp_charges.append(recomp_charges)
+        return np.array(all_recomp_charges).reshape(-1,n_atoms)
+
+    def get_bias(zA, zB, r, bias_type):
+        bias = 1
+        if bias_type == '1/r':
+            bias = 1 / r
+        if bias_type == '1/r2':
+            bias = 1 / r ** 2
+        if bias_type == 'r':
+            bias = r
+        return bias
 
     def get_NRF(zA, zB, r):
         return zA * zB * Converter.au2kcalmola / (r ** 2)

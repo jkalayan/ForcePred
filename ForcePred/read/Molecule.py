@@ -12,6 +12,7 @@ This module is used to store information required to predict forces:
 
 '''
 
+import math
 import numpy as np
 from ..calculate.Plotter import Plotter
 from ..calculate.Converter import Converter
@@ -79,13 +80,17 @@ class Molecule(object):
             Molecule.remove_variants(self, unconserved)
             print('New dataset shape is', self.coords.shape, 
                     self.forces.shape, self.energies.shape)
+        return np.array(unconserved)
 
     def remove_variants(self, unconserved):
-        for s in unconserved:
-            self.coords = np.delete(self.coords, s, axis=0)
-            self.forces = np.delete(self.forces, s, axis=0)
-            if hasattr(self, 'energies'):
-                self.energies = np.delete(self.energies, s, axis=0)
+        s = unconserved
+        #for s in unconserved:
+        self.coords = np.delete(self.coords, s, axis=0)
+        self.forces = np.delete(self.forces, s, axis=0)
+        if hasattr(self, 'energies'):
+            self.energies = np.delete(self.energies, s, axis=0)
+        if hasattr(self, 'charges'):
+            self.charges = np.delete(self.charges, s, axis=0)
 
     def make_train_test(molecule, variable, split):
         '''Split input data into training and test sets. Data is 
@@ -93,17 +98,23 @@ class Molecule(object):
         indices for each set.'''
         sorted_i = np.argsort(variable)
         _Nstructures = len(variable)
-        _Ntrain = int(_Nstructures / split) #4
+        _Ntrain = math.floor(_Nstructures / split) #round down
         print(_Nstructures, _Ntrain, split)
         #a = np.array(range(0,_Nstructures))
         a = sorted_i
         b = np.where(a % int(_Nstructures/_Ntrain+1),-1,a)
         c = np.where(a % int(_Nstructures/_Ntrain+1),a,-1)
         molecule.train = b[(b>=0)]
-        np.savetxt('train_indices.txt', b)
+        #np.savetxt('train_indices.txt', b)
         #print(molecule.train.shape)
         molecule.test = c[(c>0)]
         #print(molecule.test.shape)
+
+    def make_train_test_random_chunks(molecule, variable, split):
+        '''Split data into n even chunks, then randomly sample 1/n
+        points within each chunk'''
+        sorted_i = np.argsort(variable)
+
 
     def sort_by_energy(self):
         self.energies = np.array(self.energies)
