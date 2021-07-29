@@ -12,6 +12,8 @@ from keras import backend as K
 import tensorflow as tf
 from ..calculate.MM import MM
 from ..calculate.Converter import Converter
+from ..calculate.Binner import Binner
+from ..calculate.Plotter import Plotter
 from ..write.Writer import Writer
 from ..read.Molecule import Molecule
 import sys
@@ -23,18 +25,46 @@ class Network(object):
     def __init__(self):
         self.model = None
 
-    def get_variable_depth_model(self, molecule, input, output):
+    def get_variable_depth_model(self, molecule, nodes, input, output):
         start_time = time.time()
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
+
+        ###sort input and output by equivalent atoms
+        equiv_atoms = False
+        print('equiv_atoms', equiv_atoms)
+        all_resorted_list = []
+        if len(input[0]) == _NC2 and equiv_atoms:
+            A = Molecule.find_bonded_atoms(molecule.atoms, 
+                    molecule.coords[0])
+            indices, pairs_dict = Molecule.find_equivalent_atoms(
+                    molecule.atoms, A)
+            all_sorted_list, all_resorted_list = Molecule.get_sorted_pairs(
+                    input, pairs_dict)
+            #print('\norig input', input)
+            input = np.take_along_axis(input, 
+                    all_sorted_list, axis=1)
+            #print('\nnew input', input)
+            output = np.take_along_axis(output, 
+                    all_sorted_list, axis=1)
+
+            print(molecule.atoms)
+            print(A)
+            print(pairs_dict)
+            #print('all_sorted_list', all_sorted_list)
+            #print('all_resorted_list', all_resorted_list)
+
         train_input = input
         train_output = output
+
         #np.savetxt('input.txt', input)
         #np.savetxt('output.txt', output)
         train = True #False
         if train:
             train_input = np.take(input, molecule.train, axis=0)
+            #print('\ntrain_input', train_input)
             train_output = np.take(output, molecule.train, axis=0)
+            #print('\ntrain_output', train_output)
             #np.savetxt('trainset-input.txt', train_input)
             #np.savetxt('trainset-output.txt', train_output)
             #np.savetxt('train_indices.txt', molecule.train)
@@ -44,6 +74,13 @@ class Network(object):
         scaled_output, self.scale_output_max, self.scale_output_min = \
                 Network.get_scaled_values(train_output)
 
+        '''
+        print('\npairwise network')
+        train_prediction_scaled = Network.pairwise_NN(scaled_input, 
+                scaled_output, nodes, _NC2)
+        '''
+
+        #'''
         #np.savetxt('scaled_input.txt', scaled_input)
         #np.savetxt('scaled_output.txt', scaled_output)
         print('input shape: {}'.format(scaled_input.shape))
@@ -56,10 +93,11 @@ class Network(object):
         model_in = Input(shape=(scaled_input.shape[1],))
         model = model_in
         best_error = 1000
-        n_nodes = 10 #1000
+        n_nodes = nodes #10 #1000
         n_epochs = 100000 #100000
         print('max depth: {}\nn_nodes: {}\nn_epochs: {}'.format(
                 max_depth, n_nodes, n_epochs))
+
         for i in range(0, max_depth):
             if i > 0:
                 model = concatenate([model,model_in])
@@ -99,6 +137,9 @@ class Network(object):
         model = load_model('best_ever_model')
         print('train', model.evaluate(scaled_input, scaled_output, verbose=2))
         train_prediction_scaled = model.predict(scaled_input)
+
+        #'''
+
         #print('\nscaled_input', scaled_input)
         #print('scaled_output', scaled_output)
         #print('train_predicition_scaled', train_prediction_scaled)
@@ -119,12 +160,119 @@ class Network(object):
             #print('train_prediction2', train_prediction)
         #np.savetxt('trainset-prediction.txt', train_prediction)
 
+
+        #print('+', len(train_prediction))
+        atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) for z, n in 
+                zip(molecule.atoms, range(1,len(molecule.atoms)+1))]
+        atom_pairs = []
+        for i in range(len(molecule.atoms)):
+            for j in range(i):
+                atom_pairs.append('{}_{}'.format(atom_names[i], 
+                    atom_names[j]))
+
+        input_header = 'input'
+        if len(scaled_input[0]) == _NC2:
+            input_header = ['input_' + s for s in atom_pairs]
+            input_header = ','.join(input_header)
+        output_header = 'output'
+        if len(scaled_output[0]) == _NC2:
+            output_header = ['output_' + s for s in atom_pairs]
+            output_header = ','.join(output_header)
+        prediction_header = 'prediction'
+        if len(train_prediction[0]) == _NC2:
+            prediction_header = ['prediction_' + s for s in atom_pairs]
+            prediction_header = ','.join(prediction_header)
+        header = input_header + ',' + output_header + ',' + prediction_header
+        #header = 'input,output,prediction'
+
+
+        if len(input[0]) == _NC2 and equiv_atoms:
+
+
+            #input_resorted = np.take_along_axis(input, 
+                    #all_resorted_list, axis=1)
+            #print('\ninput_resorted', train_input)
+
+            train_resorted_list = np.take(all_resorted_list, 
+                    molecule.train, axis=0)
+            #print('\ntrained new input', train_input)
+            train_input = np.take_along_axis(train_input, 
+                    train_resorted_list, axis=1)
+            #print('\ntrained orig input', train_input)
+            train_output = np.take_along_axis(train_output, 
+                    train_resorted_list, axis=1)
+            train_prediction = np.take_along_axis(train_prediction, 
+                    train_resorted_list, axis=1)
+            #print('\ntrained orig pred', train_prediction)
+        
         Writer.write_csv([train_input, train_output, train_prediction], 
-                'trainset_inp_out_pred', 'input,output,prediction')
+                'trainset_inp_out_pred', header)
 
-        Network.get_validation(molecule, input, output)
+        Network.get_validation(molecule, input, output, header, atom_names, 
+                all_resorted_list, equiv_atoms, train_output, 
+                train_prediction)
 
-    def get_validation(molecule, input, output):
+
+    def pairwise_NN(scaled_input, scaled_output, nodes, _NC2):
+        '''For each pairwise NRF input, create a 1000 node dense layer and
+        then concat these models back into one.'''
+        print('scaled_input shape:', scaled_input.shape)
+        scaled_input = scaled_input.T
+        print('scaled_input shape:', scaled_input.shape)
+        scaled_output = scaled_output.T
+
+        file_name = 'best_ever_model'
+        mc = ModelCheckpoint(file_name, monitor='loss', 
+                mode='min', save_best_only=True)
+        es = EarlyStopping(monitor='loss', patience=500)
+        n_nodes = nodes #10 #1000
+        n_epochs = 1000 #100000
+        print('n_nodes: {}\nn_epochs: {}'.format(n_nodes, n_epochs))
+
+        new_scaled_input = []
+        new_scaled_output = []
+        model_input = []
+        model_output = []
+        for i in range(_NC2):
+            model_in = Input(shape=(1,))
+            net = Dense(units=n_nodes, activation='sigmoid')(model_in)
+            net = Dense(units=1, activation='sigmoid')(net)
+            model_in = Model(model_in, net)
+            model_in.summary()
+            new_scaled_input.append(scaled_input[i])
+            new_scaled_output.append(scaled_output[i])
+            model_input.append(model_in.input)
+            model_output.append(model_in.output)
+
+        #model_out = concatenate(model_output)
+        #model_out = Dense(units=_NC2, activation='linear')(model_out)
+        model = Model(inputs=model_input, outputs=model_output)
+        model.compile(loss='mse', optimizer='adam', 
+            metrics=['mae', 'acc']) #mean abs error, accuracy
+        model.summary()
+        model.fit(new_scaled_input, new_scaled_output, epochs=n_epochs, 
+                verbose=2, callbacks=[es,mc])
+
+        model = load_model(file_name)
+        print('train', model.evaluate(new_scaled_input, new_scaled_output, 
+                verbose=2))
+        train_prediction_scaled = model.predict(new_scaled_input)
+        train_prediction_scaled = np.array(
+                train_prediction_scaled).reshape(-1,_NC2)
+        #print('train_prediction_scaled', train_prediction_scaled)
+        #train_prediction_scaled = train_prediction_scaled[0].reshape(-1,_NC2)
+        print('train_prediction_scaled shape', train_prediction_scaled.shape)
+        #print('scaled_output', scaled_output.T, scaled_output.T.shape)
+
+        print()
+        return train_prediction_scaled
+
+
+
+
+
+    def get_validation(molecule, input, output, header, atom_names, 
+            all_resorted_list, equiv_atoms, train_output, train_prediction):
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
         test_input = np.take(input, molecule.test, axis=0)
@@ -138,9 +286,26 @@ class Network(object):
                 Network.get_scaled_values(test_output)
 
         model = load_model('best_ever_model')
+
+        '''
+        print('\npairwise test')
+        new_scaled_input_test = []
+        new_scaled_output_test = []
+        for i in range(_NC2):
+            new_scaled_input_test.append(scaled_input_test.T[i])
+            new_scaled_output_test.append(scaled_output_test.T[i])
+        print('test', model.evaluate(new_scaled_input_test, 
+            new_scaled_output_test, verbose=2))
+        test_prediction_scaled = model.predict(new_scaled_input_test)
+        test_prediction_scaled = np.array(
+                test_prediction_scaled).reshape(-1,_NC2)
+        '''
+
+        #'''
         print('test', model.evaluate(scaled_input_test, scaled_output_test, 
             verbose=2))
         test_prediction_scaled = model.predict(scaled_input_test)
+        #'''
  
         if np.amax(test_output) > 0 and np.amin(test_output) < 0:
         #if len(output[0]) == _NC2:
@@ -156,29 +321,68 @@ class Network(object):
                 #test_prediction = -test_prediction
         #np.savetxt('testset-prediction.txt', test_prediction)
 
-        Writer.write_csv([test_input, test_output, test_prediction], 
-                'testset_inp_out_pred', 'input,output,prediction')
+        if len(input[0]) == _NC2 and equiv_atoms:
+            test_resorted_list = np.take(all_resorted_list, 
+                    molecule.test, axis=0)
+            test_input = np.take_along_axis(test_input, test_resorted_list,
+                    axis=1)
+            test_output = np.take_along_axis(test_output, test_resorted_list,
+                    axis=1)
+            test_prediction = np.take_along_axis(test_prediction, 
+                    test_resorted_list, axis=1)
 
-        get_recomp = False
-        if get_recomp:
+        Writer.write_csv([test_input, test_output, test_prediction], 
+                'testset_inp_out_pred', header)
+
+        '''
+        ##output charges!
+        if len(test_prediction[0]) == _NC2:
             coords_test = np.take(molecule.coords, molecule.test, axis=0)
-            coords = np.take(molecule.coords, molecule.train, axis=0)
+            charges_test = np.take(molecule.charges, molecule.test, axis=0)
+            test_recomp_charges = Converter.get_recomposed_charges(
+                    coords_test, test_prediction, n_atoms, _NC2)
+            output_header = ['output_' + s for s in atom_names]
+            prediction_header = ['prediction_' + s for s in atom_names]
+            Writer.write_csv([charges_test, test_recomp_charges], 
+                    'testset_ESP_charges', 
+                    ','.join(output_header+prediction_header))
+        '''
+
+        #get_recomp = False
+        #if get_recomp:
+        #output forces!
+        if len(test_prediction[0]) == _NC2:
+
+            coords_test = np.take(molecule.coords, molecule.test, axis=0)
+            #coords = np.take(molecule.coords, molecule.train, axis=0)
+            '''
             forces_test = np.take(molecule.forces, molecule.test, axis=0)
             forces = np.take(molecule.forces, molecule.train, axis=0)
-            charges_test = np.take(molecule.charges, molecule.test, axis=0)
-            charges = np.take(molecule.charges, molecule.train, axis=0)
+            '''
+            forces_test = np.take(molecule.forces, molecule.test, axis=0)
+            #charges = np.take(molecule.charges, molecule.train, axis=0)
             #test_recomp_forces = Network.get_recomposed_forces(coords_test, 
                     #test_prediction, n_atoms, _NC2)
             #recomp_forces = Network.get_recomposed_forces(coords, 
                     #train_prediction, n_atoms, _NC2)
-            test_recomp_charges = Converter.get_recomposed_charges(
+            test_recomp_forces = Network.get_recomposed_forces(
                     coords_test, test_prediction, n_atoms, _NC2)
-            recomp_charges = Converter.get_recomposed_charges(coords, 
-                    train_prediction, n_atoms, _NC2)
+            #recomp_charges = Converter.get_recomposed_charges(coords, 
+                    #train_prediction, n_atoms, _NC2)
+
+            output_header = ['output_' + s + i for s in atom_names
+                    for i in ['x', 'y', 'z']]
+            prediction_header = ['prediction_' + s + i for s in atom_names
+                    for i in ['x', 'y', 'z']]
+            Writer.write_csv([forces_test.reshape(-1,n_atoms*3), 
+                    test_recomp_forces.reshape(-1,n_atoms*3)], 
+                    'testset_atomic_forces', 
+                    ','.join(output_header+prediction_header))
             #Writer.write_xyz(test_recomp_forces, molecule.atoms, 
                 #'testset-predicted-forces.xyz', 'w')
             #Writer.write_xyz(recomp_forces, molecule.atoms, 
                 #'trainset-predicted-forces.xyz', 'w')
+            '''
             Writer.write_xyz(coords_test, molecule.atoms, 
                 'testset-coords.xyz', 'w')
             #Writer.write_xyz(forces_test, molecule.atoms, 
@@ -186,7 +390,24 @@ class Network(object):
             Writer.write_xyz(coords, molecule.atoms, 
                 'trainset-coords.xyz', 'w')
             #Writer.write_xyz(forces, molecule.atoms, 
-                #'trainset-forces.xyz', 'w')      
+                #'trainset-forces.xyz', 'w')    
+            '''
+
+        scurves = True
+        if scurves:
+            train_bin_edges, train_hist = Binner.get_scurve(
+                    train_output.flatten(), 
+                    train_prediction.flatten(), 
+                    'train-hist.txt')
+
+            test_bin_edges, test_hist = Binner.get_scurve(
+                    test_output.flatten(), #actual
+                    test_prediction.flatten(), #prediction
+                    'test-hist.txt')
+           
+            Plotter.plot_2d([train_bin_edges, test_bin_edges], 
+                    [train_hist, test_hist], ['train', 'test'], 
+                    'Error', '% of points below error', 's-curves.png')
 
 
     def get_scaled_values(values):
@@ -267,6 +488,39 @@ class Network(object):
         #print(np.array(all_recomp_forces).shape)
         return np.array(all_recomp_forces).reshape(-1,n_atoms,3)
 
+    def get_scaling_factors(all_coords, all_next_coords, 
+            all_prediction, n_atoms, _NC2):
+        mat_q_new = []
+        delta_q = []
+        for coords, next_coords, prediction in zip(all_coords, 
+                all_next_coords, all_predicition):
+            new_rij = np.zeros((3, n_atoms, n_atoms))
+            new_eij = np.zeros((3, n_atoms, n_atoms))
+            for i in range(n_atoms):
+                for j in range(i):
+                    new_rij[:,i,j] = (new_coords[i,:] - coords[j,:])
+                    new_rij[:,j,i] = -new_rij[:,i,j]
+                    new_eij[:,i,j] = new_rij[:i,j] / np.reshape(
+                            np.linalg.norm(new_rij[:,i,j], axis=0), (-1,1))
+
+            new_eij2 = new_eij.reshape(n_atoms*3,_NC2)
+            forces = Network.get_recomposed_forces(all_coords, 
+                    [prediction], n_atoms, _NC2)
+            forces2 = forces.reshape(n_atoms*3)
+            q_new = np.matmul(np.linalg.pinv(new_eij2), forces2)
+            mat_q_new.append(q_new)
+
+            _N = -1
+            for i in range(n_atoms):
+                for j in range(i):
+                    _N += 1
+                    dq = (q_new[_N] - predicition[_N]) / np.reshape(
+                            np.linalg.norm(new_rij[:,i,j], axis=0), (-1,1))
+
+        mat_q_new = np.reshape(np.vstack(mat_q_new), (-1,_NC2))
+
+
+
     def get_scaled(a, b, x_min, x_max, x):
         x_norm = (b - a) * (x - x_min) / (x_max - x_min) + a
         return x_norm
@@ -292,12 +546,12 @@ class Network(object):
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
 
-        scale_NRF = network.scale_NRF #29.10017376084781# 
-        scale_NRF_min = network.scale_NRF_min # 0.03589677731052864 #
+        scale_NRF = network.scale_input_max #29.10017376084781# 
+        scale_NRF_min = network.scale_input_min # 0.03589677731052864 #
         scale_NRF_all = 0 #network.scale_NRF_all #
         scale_NRF_min_all = 0 #network.scale_NRF_min_all #
-        scale_F = network.scale_F # 
-        scale_F_min = network.scale_F_min #0 #
+        scale_F = network.scale_output_max # 
+        scale_F_min = network.scale_output_min #0 #
         #scale_F_all = network.scale_F_all 
         #scale_F_min_all = network.scale_F_min_all 
         #print(scale_NRF, scale_NRF_min, scale_F)
@@ -325,6 +579,15 @@ class Network(object):
         _E_prev = 0
         temp = 2
         dt = 0.5
+        equiv_atoms = False
+        print('equiv_atoms', equiv_atoms)
+
+        if equiv_atoms:
+            A = Molecule.find_bonded_atoms(molecule.atoms, 
+                    molecule.coords[0])
+            indices, pairs_dict = Molecule.find_equivalent_atoms(
+                    molecule.atoms, A)
+
         for i in range(nsteps):
             #print('\t', i)
             #print('NVE coords', coords_current.shape, coords_current)
@@ -335,6 +598,14 @@ class Network(object):
 
             mat_NRF = Network.get_NRF_input(coords_current, atoms, 
                     n_atoms, _NC2)
+
+            if equiv_atoms:
+                all_sorted_list, all_resorted_list = \
+                        Molecule.get_sorted_pairs(
+                        mat_NRF, pairs_dict)
+                mat_NRF = np.take_along_axis(mat_NRF, 
+                        all_sorted_list, axis=1)
+
             mat_NRF_scaled = mat_NRF / scale_NRF
             #mat_NRF_scaled = Network.get_scaled(0, 1, scale_NRF_min, 
                     #scale_NRF, mat_NRF)
@@ -371,6 +642,14 @@ class Network(object):
             #prediction = Network.get_unscaled(0, 1, scale_NRF_min, scale_NRF, 
                     #prediction_scaled - 0.5)
 
+            if equiv_atoms:
+                #print(mat_NRF.shape, prediction.shape)
+                mat_NRF = np.take_along_axis(mat_NRF, 
+                        all_resorted_list, axis=1)
+                prediction = np.take_along_axis(prediction, 
+                        all_resorted_list, axis=1)
+
+
             recomp_forces = Network.get_recomposed_forces([coords_current], 
                     [prediction], n_atoms, _NC2)
             #print('NVE recomp', recomp_forces.shape, recomp_forces)
@@ -401,21 +680,22 @@ class Network(object):
 
             #if i%(nsteps/100) == 0 and temp < 1:
                 #temp += 0.01
-            if i%(nsteps/10000) == 0:
-                np.savetxt(f1, mat_NRF)
-                np.savetxt(f2, prediction)
-                open('nn-E.txt', 'a').write('{}\n'.format(_E))#.close()
-                open('nn-KE.txt', 'a').write('{}\n'.format(_KE))#.close()
-                open('nn-T.txt', 'a').write('{}\n'.format(current_T))#.close()
-                Writer.write_xyz([coords_current], molecule.atoms, 
-                    'nn-coords.xyz', 'a', i)
-                Writer.write_xyz(recomp_forces, molecule.atoms, 
-                    'nn-forces.xyz', 'a', i)
-                Writer.write_xyz([v], molecule.atoms, 
-                    'nn-velocities.xyz', 'a', i)
-                mm.coords.append(coords_current)
-                mm.forces.append(recomp_forces)
-                mm.energies.append(_E)
+            #if i%(nsteps/1000) == 0:
+            np.savetxt(f1, mat_NRF)
+            np.savetxt(f2, prediction)
+            open('nn-E.txt', 'a').write('{}\n'.format(_E))#.close()
+            open('nn-KE.txt', 'a').write('{}\n'.format(_KE))#.close()
+            open('nn-T.txt', 'a').write('{}\n'.format(current_T))#.close()
+            Writer.write_xyz([coords_current], molecule.atoms, 
+                'nn-coords.xyz', 'a', i)
+            Writer.write_xyz(recomp_forces, molecule.atoms, 
+                'nn-forces.xyz', 'a', i)
+            Writer.write_xyz([v], molecule.atoms, 
+                'nn-velocities.xyz', 'a', i)
+            mm.coords.append(coords_current)
+            mm.forces.append(recomp_forces)
+            mm.energies.append(_E)
+
 
             coords_prev = coords_current
             coords_current = coords_next

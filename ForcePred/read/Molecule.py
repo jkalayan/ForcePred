@@ -82,6 +82,119 @@ class Molecule(object):
                     self.forces.shape, self.energies.shape)
         return np.array(unconserved)
 
+    def find_bonded_atoms(atoms, coords):
+        n_atoms = len(atoms)
+        A = np.zeros((n_atoms, n_atoms))
+        for i in range(n_atoms):
+            for j in range(i):
+                r = Converter.get_r(coords[i], coords[j])
+                #print(i+1,j+1,r)
+                if r < 1.6:
+                    A[i,j] = 1
+                    A[j,i] = 1
+                else:
+                    continue
+        return A
+
+    def find_equivalent_atoms(atoms, A):
+        '''atoms = list of nuclear charges and A is an adjacency matrix
+        returns a list of indices of atoms that are equivalent and a
+        dictionary of equivalent atom pairs.
+        X is a representation of each atom type in the molecule.'''
+        n_atoms = len(atoms)
+        Z_types = list(set(atoms))
+        N_atomTypes = len(Z_types)
+        N = np.eye(N_atomTypes)    
+        X = []
+        for z in atoms:
+            ind = Z_types.index(z)
+            X.append(N[ind])
+        X = np.array(X)
+        #print('X', X)
+        E = []
+        for row in A:
+            r = np.transpose(np.array([row,]*N_atomTypes))
+            #print('r', r)
+            h1 = r * X
+            sum1 = np.sum(h1, axis=0)
+            all_sum = 0
+            for i in range(len(h1)):
+                h = h1[i]
+                is_zero = np.all(h == 0)
+                if is_zero == False:
+                    row2 = A[i]
+                    r2 = np.transpose(np.array([row2,]*N_atomTypes))
+                    h2 = r2 * X
+                    all_sum += np.sum(h2, axis=0)
+            cross = np.cross(sum1, all_sum.T)
+            E.append(cross)
+        E = np.array(E)
+        #print('E', E)
+        u, indices = np.unique(E, axis=0, return_inverse=True)
+
+        pairs = []
+        pairs_dict = {}
+        _N = -1
+        for i in range(n_atoms):
+            for j in range(i):
+                _N += 1
+                pair = (indices[i], indices[j])
+                pairs.append(pair)
+                if pair not in pairs_dict:
+                    pairs_dict[pair] = []
+                pairs_dict[pair].append(_N)
+
+        return indices, pairs_dict
+
+
+
+    def get_sorted_pairs(all_q_list, pairs_dict):
+        '''Input list of decomposed forces and pairs_dict and output 
+        a sorted list of decomposed forces and original indices'''
+        _NC2 = len(all_q_list[0])
+
+        ##q_list = np.random.choice(1000, _NC2+1)
+        #print('\nq_list', q_list, len(q_list))
+
+        all_sorted_list = []
+        all_resorted_list = []
+
+        for q_list in all_q_list:
+            sorted_N_list = []
+            for pair, list_N in pairs_dict.items():
+                qs = []
+                for _N in list_N:
+                    qs.append(q_list[_N])
+                    #print(_N, pair, q_list[_N])
+                qs = np.array(qs)
+                sorted_ = np.argsort(qs)
+                #print('\tsorted', sorted_)
+                for i in sorted_:
+                    sorted_N_list.append(list_N[i])
+
+            resorted_N_list = np.argsort(sorted_N_list) #double sort for orig
+            all_sorted_list.append(np.array(sorted_N_list))
+            all_resorted_list.append(np.array(resorted_N_list))
+
+        all_sorted_list = np.array(all_sorted_list)
+        all_resorted_list = np.array(all_resorted_list)
+
+        '''
+        #print('all_sorted_list', all_sorted_list)
+        #print('all_resorted_list', all_resorted_list)
+
+        q_list_sorted = np.take_along_axis(all_q_list, 
+                all_sorted_list, axis=1)
+        q_list_check = np.take_along_axis(q_list_sorted, all_resorted_list,
+                axis=1)
+
+        #print('\nq_list_sorted', q_list_sorted)
+        #print('\nq_list_check', q_list_check)
+        #print('\nall_q_list', all_q_list)
+        '''
+
+        return all_sorted_list, all_resorted_list
+
     def remove_variants(self, unconserved):
         s = unconserved
         #for s in unconserved:
@@ -99,7 +212,8 @@ class Molecule(object):
         sorted_i = np.argsort(variable)
         _Nstructures = len(variable)
         _Ntrain = math.floor(_Nstructures / split) #round down
-        print(_Nstructures, _Ntrain, split)
+        print('total points:', _Nstructures, 'number of training points:', 
+                _Ntrain, 'ratio:', round(split, 3))
         #a = np.array(range(0,_Nstructures))
         a = sorted_i
         b = np.where(a % int(_Nstructures/_Ntrain+1),-1,a)
