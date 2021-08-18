@@ -277,13 +277,32 @@ def run_force_pred(input_files='input_files',
     check_E_conservation = True
     if check_E_conservation:
         scale_NRF = 9650.66147293977
-        mat_NRF = Network.get_NRF_input(molecule.coords[0], molecule.atoms, 
+        scale_F = 131.25482358398773
+        mat_NRF = Network.get_NRF_input([molecule.coords[0]], molecule.atoms, 
                len(molecule.atoms), len(molecule.mat_NRF[0]))
-        print(mat_NRF.shape)
-        print(molecule.mat_F[0])
-        Conservation.get_conservation(molecule.coords[0], molecule.forces[0], 
-                molecule.mat_NRF[0].reshape(1,-1), scale_NRF, 
-                'best_ever_model')
+        #print(mat_NRF.shape)
+        #print(molecule.mat_F[0])
+
+        '''
+        q_scaled = Conservation.get_conservation(
+                molecule.coords[0], molecule.forces[0], 
+                molecule.atoms, scale_NRF, scale_F, 
+                'best_ever_model', molecule)
+        '''
+
+        run_mm = True
+        if run_mm:
+            print('\nrun MM with ANN potential')
+            nsteps=1000
+            network = None
+            mm = Network.run_NVE(network, molecule, timestep=0.5, 
+                    nsteps=nsteps)
+
+            print('checking mm forces')
+            mm.coords = mm.get_3D_array([mm.coords])
+            mm.forces = mm.get_3D_array([mm.forces]) 
+            mm.energies = np.array(mm.energies)
+            unconserved = mm.check_force_conservation()
 
 
     '''

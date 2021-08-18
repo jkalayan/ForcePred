@@ -104,14 +104,27 @@ class Binner(object):
 
     def get_scurve(baseline, values, filename):
         RSE = np.sqrt((baseline-values)**2)
-        print(np.amax(RSE))
-        print(np.sqrt(np.sum((baseline-values)**2)/values.shape[0]))
+        #print(np.amax(RSE))
+        #print(np.sqrt(np.sum((baseline-values)**2)/values.shape[0]))
         hist, bin_edges = np.histogram(RSE,1000,(-1,100))
         hist = np.cumsum(hist)
-        print(bin_edges.shape)
+        #print(bin_edges.shape)
         bin_edges = bin_edges[range(1,bin_edges.shape[0])]
-        print(hist.shape)
+        #print(hist.shape)
         hist = hist/values.shape[0]*100
         np.savetxt(filename, np.column_stack((bin_edges,hist)))
         return bin_edges, hist
 
+
+    def get_error(all_actual, all_prediction):
+        '''Get RMS and MAE for array values'''
+        _N = np.size(all_actual)
+        mae = 0
+        rms = 0
+        for actual, prediction in zip(all_actual, all_prediction):
+            diff = prediction - actual
+            mae += np.sum(abs(diff))
+            rms += np.sum(diff ** 2)
+        mae = mae / _N
+        rms = rms / _N
+        return mae, rms

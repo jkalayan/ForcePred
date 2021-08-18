@@ -85,7 +85,8 @@ class OPTParser(object):
                         #print('e', energy)
                     if 'Axes restored to original set' in line:
                         force = self.clean(self.extract(4, input_), 3) \
-                                * Converter.au2kcalmola
+                                * Converter.au2kJmola
+                                #* Converter.au2kcalmola
                         #print('f', force.shape)
                     if 'Mulliken charges:' in line:
                         charges = self.clean(self.extract(1, input_), 1)

@@ -64,15 +64,19 @@ def run_force_pred(input_files='input_files',
 
 
     run_net = True
-    split = len(molecule.coords)/train #30 #2 4 5 20 52 260
+    #train_split = len(molecule.coords)/train #30 #2 4 5 20 52 260
+    #test_split = 2
+    test = 360
     if run_net:
         print('\nget train and test sets, '\
-                'training set is {} points.'\
-                '\nNumber of nodes is {}'.format(train, nodes))
+                'training set is {} points. Testing set in {} points.'\
+                '\nNumber of nodes is {}'.format(train, test, nodes))
         print('\nNeural network input is {}.'\
                 '\nNeural network output is {}.'.format(input, output))
-        Molecule.make_train_test(molecule, molecule.energies.flatten(), 
-                split) #get train and test sets
+        train, test = Molecule.make_train_test(molecule.energies.flatten(), 
+                train, test) 
+        molecule.test = test
+        molecule.train = train
         print('\nget ANN model')
         if input == 'dih':
             input = dihedrals.phis.T[0].reshape(-1,1)
@@ -87,6 +91,7 @@ def run_force_pred(input_files='input_files',
             nodes, input, output)
     sys.stdout.flush()
 
+    '''
     print('\nAtom pairs:')
     print('i indexA indexB - atomA atomB')
     _N = -1
@@ -96,6 +101,7 @@ def run_force_pred(input_files='input_files',
             #print(_N+1, i+1, j+1, '-', Converter._ZSymbol[molecule.atoms[i]], 
                     #Converter._ZSymbol[molecule.atoms[j]])
             print(_N+1, '-', atom_names[i], atom_names[j])
+    '''
 
     print(datetime.now() - startTime)
 

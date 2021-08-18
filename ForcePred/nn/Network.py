@@ -16,6 +16,7 @@ from ..calculate.Binner import Binner
 from ..calculate.Plotter import Plotter
 from ..write.Writer import Writer
 from ..read.Molecule import Molecule
+from ..calculate.Conservation import Conservation
 import sys
 import time
 
@@ -213,6 +214,8 @@ class Network(object):
                 train_prediction)
 
 
+
+
     def pairwise_NN(scaled_input, scaled_output, nodes, _NC2):
         '''For each pairwise NRF input, create a 1000 node dense layer and
         then concat these models back into one.'''
@@ -334,7 +337,7 @@ class Network(object):
         Writer.write_csv([test_input, test_output, test_prediction], 
                 'testset_inp_out_pred', header)
 
-        '''
+        #'''
         ##output charges!
         if len(test_prediction[0]) == _NC2:
             coords_test = np.take(molecule.coords, molecule.test, axis=0)
@@ -346,12 +349,11 @@ class Network(object):
             Writer.write_csv([charges_test, test_recomp_charges], 
                     'testset_ESP_charges', 
                     ','.join(output_header+prediction_header))
-        '''
+        #'''
 
-        #get_recomp = False
-        #if get_recomp:
+        get_recomp = False
         #output forces!
-        if len(test_prediction[0]) == _NC2:
+        if len(test_prediction[0]) == _NC2 and get_recomp:
 
             coords_test = np.take(molecule.coords, molecule.test, axis=0)
             #coords = np.take(molecule.coords, molecule.train, axis=0)
@@ -393,7 +395,17 @@ class Network(object):
                 #'trainset-forces.xyz', 'w')    
             '''
 
-        scurves = True
+        train_mae, train_rms = Binner.get_error(train_output.flatten(), 
+                    train_prediction.flatten())
+
+        test_mae, test_rms = Binner.get_error(test_output.flatten(), 
+                    test_prediction.flatten())
+
+        print('\nTrain MAE: {} \nTrain RMS: {} \nTest MAE: {} '\
+                '\nTest RMS: {}'.format(train_mae, train_rms, 
+                test_mae, test_rms))
+
+        scurves = False
         if scurves:
             train_bin_edges, train_hist = Binner.get_scurve(
                     train_output.flatten(), 
@@ -440,16 +452,17 @@ class Network(object):
 
 
     def get_NRF_input(coords, atoms, n_atoms, _NC2):
-        mat_NRF = np.zeros((1, _NC2))
-        _N = -1
-        for i in range(n_atoms):
-            zi = atoms[i]
-            for j in range(i):
-                _N += 1
-                zj = atoms[j]
-                r = Converter.get_r(coords[i], coords[j])
-                if i != j:
-                    mat_NRF[:,_N] = Converter.get_NRF(zi, zj, r)
+        mat_NRF = np.zeros((len(coords),_NC2))
+        for s in range(len(coords)):
+            _N = -1
+            for i in range(n_atoms):
+                zi = atoms[i]
+                for j in range(i):
+                    _N += 1
+                    zj = atoms[j]
+                    r = Converter.get_r(coords[s][i], coords[s][j])
+                    if i != j:
+                        mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
         return mat_NRF
 
     def get_recomposed_forces(all_coords, all_prediction, n_atoms, _NC2):
@@ -536,6 +549,11 @@ class Network(object):
         if scale_coords:
             print('\ncoordinates being scaled by min and max NRFs')
 
+        conservation = True
+        if conservation:
+            print('\nforces are scaled to ensure energy conservation')
+
+
         mm = Molecule()
         mm.atoms = molecule.atoms
         mm.coords = []
@@ -546,6 +564,7 @@ class Network(object):
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
 
+        '''
         scale_NRF = network.scale_input_max #29.10017376084781# 
         scale_NRF_min = network.scale_input_min # 0.03589677731052864 #
         scale_NRF_all = 0 #network.scale_NRF_all #
@@ -555,9 +574,16 @@ class Network(object):
         #scale_F_all = network.scale_F_all 
         #scale_F_min_all = network.scale_F_min_all 
         #print(scale_NRF, scale_NRF_min, scale_F)
+
         print('scale_NRF: {}\nscale_NRF_min: {}\nscale_F: {}\n'\
                 'scale_F_min: {}\n'.format(
                 scale_NRF, scale_NRF_min, scale_F, scale_F_min))
+        '''
+
+        scale_NRF = 9650.66147293977
+        scale_F = 131.25482358398773
+
+
         #mm.coords.append(coords_init)
         masses = np.zeros((n_atoms,3))
         for i in range(n_atoms):
@@ -596,7 +622,7 @@ class Network(object):
             #coords_current = Converter.translate_coords(
                     #coords_current, atoms)
 
-            mat_NRF = Network.get_NRF_input(coords_current, atoms, 
+            mat_NRF = Network.get_NRF_input([coords_current], atoms, 
                     n_atoms, _NC2)
 
             if equiv_atoms:
@@ -627,7 +653,7 @@ class Network(object):
                     coords_current = Converter.get_coords_from_NRF(
                             mat_NRF[0], molecule.atoms, 
                             coords_current, scale_NRF_all, scale_NRF_min_all)
-                    mat_NRF = Network.get_NRF_input(coords_current, 
+                    mat_NRF = Network.get_NRF_input([coords_current], 
                             atoms, n_atoms, _NC2)
                     #rs = Converter.get_r_from_NRF(mat_NRF[0], atoms)
                     #print('\n', rs)
@@ -648,6 +674,12 @@ class Network(object):
                         all_resorted_list, axis=1)
                 prediction = np.take_along_axis(prediction, 
                         all_resorted_list, axis=1)
+
+            if conservation:
+                prediction = Conservation.get_conservation(
+                        coords_current, prediction, 
+                        molecule.atoms, scale_NRF, scale_F, 
+                        'best_ever_model', molecule)
 
 
             recomp_forces = Network.get_recomposed_forces([coords_current], 

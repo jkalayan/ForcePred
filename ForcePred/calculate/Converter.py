@@ -20,7 +20,7 @@ class Converter(object):
     kcal2kj = 4.184
     Eh2kcalmol = 627.5095 #hartree to kcal/mol
     Eh2kJmol = Eh2kcalmol * kcal2kj #hartree to kJ/mol
-    au2kJmola = Eh2kJmol * au2Ang #convert from Eh/a_0 to kJ/(mol Ang)
+    au2kJmola = Eh2kJmol / au2Ang #convert from Eh/a_0 to kJ/(mol Ang)
     au2kcalmola = Eh2kcalmol * au2Ang #convert from Eh/a_0 to kcal/(mol Ang)
     rad2deg = float(180) / float(np.pi) #radians to degrees
     ang2m = 1e-10
@@ -41,6 +41,7 @@ class Converter(object):
         self.mat_NRF = None
         self.get_interatomic_forces(molecule)
         if hasattr(molecule, 'charges'):
+            self.charges = molecule.charges
             self.get_interatomic_charges(molecule)
 
     def __str__(self):

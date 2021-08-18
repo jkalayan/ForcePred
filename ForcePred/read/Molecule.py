@@ -205,24 +205,41 @@ class Molecule(object):
         if hasattr(self, 'charges'):
             self.charges = np.delete(self.charges, s, axis=0)
 
-    def make_train_test(molecule, variable, split):
+    def make_train_test_old(molecule, variable, split):                       
+        '''Split input data into training and test sets. Data is          
+        ordered by a particular variable, outputted are lists of          
+        indices for each set.'''                                          
+        sorted_i = np.argsort(variable)                                   
+        _Nstructures = len(variable)                                      
+        _Ntrain = math.floor(_Nstructures / split) #round down            
+        print('total points:', _Nstructures, 'number of training points:',
+                _Ntrain, 'ratio:', round(split, 3))                       
+        #a = np.array(range(0,_Nstructures))                              
+        a = sorted_i                                                      
+        b = np.where(a % int(_Nstructures/_Ntrain+1),-1,a)                
+        c = np.where(a % int(_Nstructures/_Ntrain+1),a,-1)                
+        molecule.train = b[(b>=0)]                                        
+        #np.savetxt('train_indices.txt', b)                               
+        #print(molecule.train.shape)                                      
+        molecule.test = c[(c>0)]                                          
+        #print(molecule.test.shape) 
+
+    def make_train_test(variable, n_train, n_test):
         '''Split input data into training and test sets. Data is 
         ordered by a particular variable, outputted are lists of
         indices for each set.'''
         sorted_i = np.argsort(variable)
-        _Nstructures = len(variable)
-        _Ntrain = math.floor(_Nstructures / split) #round down
-        print('total points:', _Nstructures, 'number of training points:', 
-                _Ntrain, 'ratio:', round(split, 3))
-        #a = np.array(range(0,_Nstructures))
-        a = sorted_i
-        b = np.where(a % int(_Nstructures/_Ntrain+1),-1,a)
-        c = np.where(a % int(_Nstructures/_Ntrain+1),a,-1)
-        molecule.train = b[(b>=0)]
-        #np.savetxt('train_indices.txt', b)
-        #print(molecule.train.shape)
-        molecule.test = c[(c>0)]
-        #print(molecule.test.shape)
+        n_structures = len(variable)
+        np.random.seed(22) ##selected for reproducability
+        test = np.random.choice(n_structures, n_test)
+        train = np.random.choice(np.setdiff1d(range(n_structures), test), 
+                n_train) #select train from points not in test
+
+        print('total points:', n_structures, '\nnumber of training points:', 
+                train.shape, 'fraction: 1 /', round(n_structures/n_train, 3), 
+                '\nnumber of test points:', test.shape, 
+                'fraction: 1 /', round(n_structures/n_test, 3))
+        return train, test
 
     def make_train_test_random_chunks(molecule, variable, split):
         '''Split data into n even chunks, then randomly sample 1/n
