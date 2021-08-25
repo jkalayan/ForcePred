@@ -87,7 +87,7 @@ class Conservation(object):
 
         return q0_scaled
 
-    def get_displaced_structures(coords, dr):
+    def get_displaced_structures_old(coords, dr):
         '''For each atom, displace xyz coords by dr and save as 
         new structure'''
         all_plus_coords = []
@@ -102,7 +102,7 @@ class Conservation(object):
                 all_minus_coords.append(minus_coords)
         return np.array(all_plus_coords), np.array(all_minus_coords)
 
-    def get_displaced_structures_new(coords, dr):
+    def get_displaced_structures(coords, dr):
         '''For each atom, displace xyz coords by dr and save as 
         new structures'''
         n_atoms = len(coords)
@@ -110,7 +110,7 @@ class Conservation(object):
                 coords[np.newaxis, :, :], n_atoms*3, axis=0)
         all_minus_coords = np.repeat(
                 coords[np.newaxis, :, :], n_atoms*3, axis=0)
-        c = 0
+        c = -1
         for i in range(len(coords)):
             for j in range(3):
                 c += 1

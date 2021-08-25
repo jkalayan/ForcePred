@@ -36,7 +36,7 @@ def run_force_pred(input_files='input_files',
 
     if list_files:
         input_files = open(list_files).read().split()
-    #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
+    OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
     #print(molecule.charges)
     #print(molecule.charges.shape)
     #Converter.get_interatomic_charges(molecule)
@@ -64,10 +64,10 @@ def run_force_pred(input_files='input_files',
             molecule)
     '''
 
-    #'''
+    '''
     XYZParser(atom_file, coord_files, force_files, 
             energy_files, molecule)
-    #'''
+    '''
 
 
     '''
@@ -292,10 +292,10 @@ def run_force_pred(input_files='input_files',
         '''
         scale_NRF = 9650.66147293977
         scale_F = 131.25482358398773
-        q_scaled = Conservation.get_conservation(
-                molecule.coords[0], molecule.forces[0], 
-                molecule.atoms, scale_NRF, scale_F, 
-                'best_ever_model', molecule)
+        q_scaled = Conservation.get_conservation(molecule.coords[0], 
+                molecule.forces[0], molecule.atoms, scale_NRF, scale_F, 
+                'best_ever_model', molecule, 0.001)
+        #print(q_scaled)
         '''
 
         run_mm = True
