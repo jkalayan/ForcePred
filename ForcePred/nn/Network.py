@@ -337,8 +337,8 @@ class Network(object):
         Writer.write_csv([test_input, test_output, test_prediction], 
                 'testset_inp_out_pred', header)
 
-        #'''
-        ##output charges!
+        '''
+        ##output charges! ##for Lejun
         if len(test_prediction[0]) == _NC2:
             coords_test = np.take(molecule.coords, molecule.test, axis=0)
             charges_test = np.take(molecule.charges, molecule.test, axis=0)
@@ -349,9 +349,9 @@ class Network(object):
             Writer.write_csv([charges_test, test_recomp_charges], 
                     'testset_ESP_charges', 
                     ','.join(output_header+prediction_header))
-        #'''
+        '''
 
-        get_recomp = False
+        get_recomp = True
         #output forces!
         if len(test_prediction[0]) == _NC2 and get_recomp:
 
@@ -405,7 +405,7 @@ class Network(object):
                 '\nTest RMS: {}'.format(train_mae, train_rms, 
                 test_mae, test_rms))
 
-        scurves = False
+        scurves = True
         if scurves:
             train_bin_edges, train_hist = Binner.get_scurve(
                     train_output.flatten(), 
@@ -551,8 +551,11 @@ class Network(object):
 
         conservation = True
         if conservation:
-            print('\nforces are scaled to ensure energy conservation')
+            dr = 0.01
+            print('\nforces are scaled to ensure energy conservation, '\
+                    'dr = {}'.format(dr))
 
+        sys.stdout.flush()
 
         mm = Molecule()
         mm.atoms = molecule.atoms
@@ -580,9 +583,11 @@ class Network(object):
                 scale_NRF, scale_NRF_min, scale_F, scale_F_min))
         '''
 
-        scale_NRF = 9650.66147293977
-        scale_F = 131.25482358398773
+        scale_NRF = 17495.630534482527
+        scale_F = 3211.3509460299188
 
+        #scale_NRF = 13036.551114036025
+        #scale_F = 228.19031799443
 
         #mm.coords.append(coords_init)
         masses = np.zeros((n_atoms,3))
@@ -679,7 +684,7 @@ class Network(object):
                 prediction = Conservation.get_conservation(
                         coords_current, prediction, 
                         molecule.atoms, scale_NRF, scale_F, 
-                        'best_ever_model', molecule)
+                        'best_ever_model', molecule, dr)
 
 
             recomp_forces = Network.get_recomposed_forces([coords_current], 
@@ -705,7 +710,7 @@ class Network(object):
             coords_next, dE, v, current_T, _KE = \
                     MM.calculate_verlet_step(coords_current, 
                     coords_prev, recomp_forces[0], masses, timestep, dt, temp)
-            #steps = MM.calculate_step(coords_current, coords_prev, 
+            #coords_next = MM.calculate_step(coords_current, coords_prev, 
                     #recomp_forces[0], timestep, masses, timestep)
                     #ismaeel's code
             _E = _E_prev - dE

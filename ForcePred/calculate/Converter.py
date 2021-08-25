@@ -72,20 +72,20 @@ class Converter(object):
                         for x in range(0, 3):
                             val = ((self.coords[s][i][x] - 
                                     self.coords[s][j][x]) /
-                                    self.mat_r[s,_N]) * self.mat_NRF[s,_N]
+                                    self.mat_r[s,_N]) #* self.mat_NRF[s,_N]
                             mat_vals[s,i,x,_N] = val
                             mat_vals[s,j,x,_N] = -val
 
                 mat_vals2 = mat_vals[s].reshape(n_atoms*3,_NC2)
                 forces2 = self.forces[s].reshape(n_atoms*3)
                 _F = np.matmul(np.linalg.pinv(mat_vals2), forces2)
-                #'''##### if using scale factor, need to remove.
+                '''##### if using scale factor, need to remove it.
                 _N2 = -1
                 for i in range(n_atoms):
                     for j in range(i):
                         _N2 += 1
                         _F[_N2] = _F[_N2] * self.mat_NRF[s,_N2]
-                #'''#####
+                '''#####
                 mat_F.append(_F)
 
 

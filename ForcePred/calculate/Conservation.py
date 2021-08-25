@@ -28,11 +28,11 @@ class Conservation(object):
         #self.model = None
 
     def get_conservation(coords, forces, atoms, scale_NRF, scale_F, 
-            model_name, molecule):
+            model_name, molecule, dr):
         '''scale forces to ensure forces and energies are conserved'''
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
-        dr = 0.001 #angstrom
+        #dr = 0.001 #angstrom
         model = load_model(model_name)
 
         all_plus_coords, all_minus_coords = \
@@ -43,14 +43,6 @@ class Conservation(object):
         _NRF_scaled = _NRF / scale_NRF
         prediction_scaled = model.predict(_NRF_scaled)
         prediction = (prediction_scaled - 0.5) * scale_F
-        '''
-        print(prediction)
-        recomp_prediction = Network.get_recomposed_forces([coords], 
-                [prediction], n_atoms, _NC2)
-        print(recomp_prediction)
-        print(forces)
-        print()
-        '''
 
         #positively displaced structures
         plus_NRF = Conservation.get_NRF_input(all_plus_coords, atoms, 
@@ -66,7 +58,6 @@ class Conservation(object):
         minus_prediction_scaled = model.predict(minus_NRF_scaled)
         minus_prediction = (minus_prediction_scaled - 0.5) * scale_F
 
-       
         ''' ### to compare with Neil's code
         prediction = molecule.mat_F[0]
         plus_prediction = []
@@ -83,22 +74,12 @@ class Conservation(object):
         minus_prediction = np.array(minus_prediction)
         '''
 
-
         dqBA_dC = Conservation.get_finite_difference(prediction.flatten(), 
                 plus_prediction, minus_prediction, dr, n_atoms, _NC2)
 
         q0_scaled, scaled_F = Conservation.check_conservation(coords, 
                 prediction.flatten(), plus_prediction, minus_prediction, 
                 dqBA_dC, n_atoms, _NC2)
-
-        '''
-        print()
-        print(molecule.mat_F[0])
-        print(q0_scaled)
-        print()
-        print(forces)
-        print(scaled_F)
-        '''
 
 
         #recomp_forces = Network.get_recomposed_forces([coords], 
@@ -120,6 +101,23 @@ class Conservation(object):
                 all_plus_coords.append(plus_coords)
                 all_minus_coords.append(minus_coords)
         return np.array(all_plus_coords), np.array(all_minus_coords)
+
+    def get_displaced_structures_new(coords, dr):
+        '''For each atom, displace xyz coords by dr and save as 
+        new structures'''
+        n_atoms = len(coords)
+        all_plus_coords = np.repeat(
+                coords[np.newaxis, :, :], n_atoms*3, axis=0)
+        all_minus_coords = np.repeat(
+                coords[np.newaxis, :, :], n_atoms*3, axis=0)
+        c = 0
+        for i in range(len(coords)):
+            for j in range(3):
+                c += 1
+                all_plus_coords[c,i,j] = all_plus_coords[c,i,j] + dr
+                all_minus_coords[c,i,j] = all_minus_coords[c,i,j] - dr
+        return all_plus_coords, all_minus_coords
+
 
     def get_finite_difference(q0, q_plus, q_minus, dr, n_atoms, _NC2):
         '''Take predicted pairwise forces (q) for displaced structures and

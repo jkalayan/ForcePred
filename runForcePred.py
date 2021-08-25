@@ -50,9 +50,9 @@ def run_force_pred(input_files='input_files',
     #NPParser(atom_file, coord_files, force_files, energy_files, molecule)
 
     '''
-    NPParser('types_z', 
-            ['train1_aspirin_coordinates'], 
-            ['train1_aspirin_forces'], [], molecule)
+    NPParser('../types_z', 
+            ['../train1_aspirin_coordinates'], 
+            ['../train1_aspirin_forces'], [], molecule)
     '''
     '''
     NPParser('types_z', 
@@ -71,13 +71,20 @@ def run_force_pred(input_files='input_files',
 
 
     '''
-    Writer.write_xyz(molecule.coords, molecule.atoms, 'qm-coords.xyz', 'w')
-    Writer.write_xyz(molecule.forces, molecule.atoms, 'qm-forces.xyz', 'w')
-    np.savetxt('qm-energies.txt', molecule.energies)
-    np.savetxt('qm-charges.txt', molecule.charges)
+    Writer.write_xyz(molecule.coords, molecule.atoms, 'ensemble-coords.xyz', 'w')
+    Writer.write_xyz(molecule.forces, molecule.atoms, 'ensemble-forces.xyz', 'w')
+    np.savetxt('ensemble-energies.txt', molecule.energies)
+    np.savetxt('ensemble-charges.txt', molecule.charges)
+    sys.exit()
     '''
 
+    #'''
+    Writer.write_gaus_cart(molecule.coords, 
+            molecule.atoms, 'FORCE POP=MK INTEGRAL=(GRID=ULTRAFINE)', 'mm')
+
     sys.stdout.flush()
+    sys.exit()
+    #'''
 
     '''
     A = Molecule.find_bonded_atoms(molecule.atoms, molecule.coords[0])
@@ -239,7 +246,7 @@ def run_force_pred(input_files='input_files',
     sys.stdout.flush()
 
     run_net = False
-    split = 2 #2 4 5 20 52 260
+    split = 5 #2 4 5 20 52 260
     train = round(len(molecule.coords) / split, 3)
     nodes = 1000
     input = molecule.mat_NRF
@@ -248,7 +255,7 @@ def run_force_pred(input_files='input_files',
         print('\nget train and test sets, '\
                 'training set is {} points.'\
                 '\nNumber of nodes is {}'.format(train, nodes))
-        Molecule.make_train_test(molecule, molecule.energies.flatten(), 
+        Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
                 split) #get train and test sets
         #override train test
         #molecule.train = train_phis
@@ -261,7 +268,7 @@ def run_force_pred(input_files='input_files',
         run_mm = True
         if run_mm:
             print('\nrun MM with ANN potential')
-            nsteps=10000
+            nsteps=500 #10000
             mm = Network.run_NVE(network, molecule, timestep=0.5, 
                     nsteps=nsteps)
 
@@ -276,14 +283,15 @@ def run_force_pred(input_files='input_files',
 
     check_E_conservation = True
     if check_E_conservation:
-        scale_NRF = 9650.66147293977
-        scale_F = 131.25482358398773
-        mat_NRF = Network.get_NRF_input([molecule.coords[0]], molecule.atoms, 
-               len(molecule.atoms), len(molecule.mat_NRF[0]))
+
+        #mat_NRF = Network.get_NRF_input([molecule.coords[0]], molecule.atoms, 
+               #len(molecule.atoms), len(molecule.mat_NRF[0]))
         #print(mat_NRF.shape)
         #print(molecule.mat_F[0])
 
         '''
+        scale_NRF = 9650.66147293977
+        scale_F = 131.25482358398773
         q_scaled = Conservation.get_conservation(
                 molecule.coords[0], molecule.forces[0], 
                 molecule.atoms, scale_NRF, scale_F, 
@@ -293,7 +301,7 @@ def run_force_pred(input_files='input_files',
         run_mm = True
         if run_mm:
             print('\nrun MM with ANN potential')
-            nsteps=1000
+            nsteps=500
             network = None
             mm = Network.run_NVE(network, molecule, timestep=0.5, 
                     nsteps=nsteps)

@@ -35,10 +35,12 @@ class Molecule(object):
         self.coords = self.get_3D_array(other.coords)
         self.forces = self.get_3D_array(other.forces)
         if hasattr(other, 'energies'):
-            self.energies = self.get_2D_array(other.energies)
+            if len(other.energies) > 0:
+                self.energies = self.get_2D_array(other.energies)
         if hasattr(other, 'charges'):
-            self.charges = self.get_2D_array(other.charges).reshape(
-                    -1,len(self.atoms))
+            if len(other.charges) > 0:
+                self.charges = self.get_2D_array(other.charges).reshape(
+                        -1,len(self.atoms))
             #self.charges = self.get_3D_array(other.charges)
 
     def check_force_conservation(self):
