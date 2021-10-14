@@ -115,7 +115,6 @@ class Binner(object):
         np.savetxt(filename, np.column_stack((bin_edges,hist)))
         return bin_edges, hist
 
-
     def get_error(all_actual, all_prediction):
         '''Get RMS and MAE for array values'''
         _N = np.size(all_actual)
@@ -126,5 +125,18 @@ class Binner(object):
             mae += np.sum(abs(diff))
             rms += np.sum(diff ** 2)
         mae = mae / _N
-        rms = rms / _N
+        rms = (rms / _N) ** 0.5
         return mae, rms
+
+
+    def get_L1(all_actual, all_prediction, _N, threshold):
+        '''get L1 values - the percentage of points above a threshold value'''
+        all_actual = all_actual.flatten()
+        all_prediction = all_actual.flatten()
+        mae = np.zeros((all_actual.shape))
+        rms = np.zeros((all_actual.shape))
+        for actual, prediction, i in zip(all_actual, all_prediction, 
+                range(len(all_actual))):
+            diff = prediction - actual
+            mae[i] = abs(diff)
+            rms[i] = diff ** 2   

@@ -36,6 +36,7 @@ class Plotter(object):
         ### axes limits
         #ax.set_xlim(np.min(x)-3, np.max(x)+3)
         #ax.set_ylim(np.min(y)-3, np.max(y)+3)
+        #ax.set_ylim(0, 103)
         ### fix aspect ratio as square
         x0,x1 = ax.get_xlim()
         y0,y1 = ax.get_ylim()
@@ -81,6 +82,28 @@ class Plotter(object):
                 )
         plt.close(plt.gcf())
 
+    def hist_1d(x_list, xlabel, ylabel, plot_name):
+        fig, ax = plt.subplots(figsize=(10, 10), 
+                edgecolor='k') #all in one plot
+        for x in x_list:
+            x_min, x_max = np.min(x), np.max(x)
+            x_diff = int(x_max-x_min)
+            sc = ax.hist(x=x,
+                    #density=True,
+                    bins=50, 
+                    #bins=[x_diff], 
+                    #range=[[x_min, x_max]], 
+                    alpha=0.5, 
+                    #facecolor='None',
+                    edgecolor='k',
+                    )
+        Plotter.format(ax, x, x, xlabel, ylabel)
+        fig.savefig('%s' % (plot_name), 
+                transparent=True, 
+                bbox_inches='tight'
+                )
+        plt.close(plt.gcf())
+
     def hist_2d(x, y, xlabel, ylabel, plot_name):
         fig, ax = plt.subplots(figsize=(10, 10), 
                 edgecolor='k') #all in one plot
@@ -114,7 +137,7 @@ class Plotter(object):
         for x, y, label in zip(x_list, y_list, label_list):
             line = ax.plot(x, y, lw=3, label=label)
             lines.append(line)
-        ax.set_xscale('log')
+        #ax.set_xscale('log')
         Plotter.format(ax, x, y, xlabel, ylabel)
         ax.xaxis.set_tick_params(direction='in', which='both')
         ax.yaxis.set_tick_params(direction='in', which='both')

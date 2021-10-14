@@ -23,6 +23,7 @@ class AMBERParser(object):
         self.amb_forces = amb_forces
         self.filenames = [amb_top, amb_coords, amb_forces]
         self.atoms = []
+        self.n_all_atoms = 0
         self.coords = []
         self.forces = []
         self.sorted_i = None
@@ -40,6 +41,7 @@ class AMBERParser(object):
 
     def read_files(self):
         Z_ = {'H':1, 'C':6, 'O':8}
+        '''
         read_coords = Universe(self.amb_top, self.amb_coords, format='TRJ')
         read_forces = Universe(self.amb_top, self.amb_forces, format='TRJ')
         self.atoms = [Z_[tp.name[0]] for tp in read_coords.atoms]
@@ -47,8 +49,26 @@ class AMBERParser(object):
         for c, f in zip(read_coords.trajectory, read_forces.trajectory):
             self.coords.append(np.array(c.positions))
             self.forces.append(np.array(f.positions))
-        
+        '''
 
+        topology = Universe(self.amb_top, self.amb_coords[0], format='TRJ')
+        self.atoms = [Z_[tp.name[0]] for tp in topology.atoms]
+
+        for _C, _F in zip(self.amb_coords, self.amb_forces):
+            read_coords = Universe(self.amb_top, _C, format='TRJ')
+            read_forces = Universe(self.amb_top, _F, format='TRJ')
+
+            self.n_all_atoms += len(read_coords.trajectory)
+            n_atoms = self.n_all_atoms
+            for c, f in zip(read_coords.trajectory, read_forces.trajectory):
+                self.coords.append(np.array(c.positions))
+                self.forces.append(np.array(f.positions))
+
+
+        self.coords = self.get_3D_array(self.coords, len(self.atoms))
+        self.forces = self.get_3D_array(self.forces, len(self.atoms))
+
+        '''
         n_atoms = len(read_coords.trajectory)
         #print(self.atoms, n_atoms, len(forces.trajectory))
 
@@ -56,9 +76,10 @@ class AMBERParser(object):
                 #Converter.au2Ang
         self.forces = self.get_3D_array(self.forces, n_atoms) #/ \
                 #Converter.au2kcalmola
+        '''
 
-    def get_3D_array(self, np_list, n_structures):
-        return np.reshape(np.vstack(np_list), (n_structures,-1,3))
+    def get_3D_array(self, np_list, n_atoms):
+        return np.reshape(np.vstack(np_list), (-1,n_atoms,3))
 
     def get_2D_array(self, np_list):
         return np.vstack(np_list)

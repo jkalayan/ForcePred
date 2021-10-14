@@ -218,8 +218,8 @@ class Molecule(object):
                 _Ntrain, 'ratio:', round(split, 3))                       
         #a = np.array(range(0,_Nstructures))                              
         a = sorted_i                                                      
-        b = np.where(a % int(_Nstructures/_Ntrain+1),-1,a)                
-        c = np.where(a % int(_Nstructures/_Ntrain+1),a,-1)                
+        b = np.where(a % int(_Nstructures/_Ntrain),-1,a)                
+        c = np.where(a % int(_Nstructures/_Ntrain),a,-1)                
         molecule.train = b[(b>=0)]                                        
         #np.savetxt('train_indices.txt', b)                               
         #print(molecule.train.shape)                                      

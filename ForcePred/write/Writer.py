@@ -60,3 +60,30 @@ class Writer(object):
     def write_csv(list_, filename, header):
         np.savetxt('{}.csv'.format(filename), np.column_stack(list_), 
                 delimiter=',', header=header, fmt='%.3f')
+
+    def write_amber_inpcrd(coords, filename):
+        natoms = len(coords)
+        inpcrd_file = open('{}.inpcrd'.format(filename), 'w')
+        inpcrd_file.write('{}\n'.format('default_name')) 
+        inpcrd_file.write('{:5d}\n'.format(natoms)) 
+        coords.reshape(-1,6)
+        for i in coords:
+            for j in i:
+                inpcrd_file.write('{:12.7f}'.format(j))
+            inpcrd_file.write('\n')
+        inpcrd_file.close()
+
+    def write_pdb(coords, resname, resid, atoms, filename, open_type):
+        outfile = open(filename, open_type)
+        for i in range(len(atoms)):
+            atom_name = '{}{}'.format(Converter._ZSymbol[atoms[i]], i+1)
+            outfile.write('\n'.join(['{:6s}{:5d} {:^4s}{:1s}{:3s}' \
+                    ' {:1s}{:4d}{:1s}   {:8.3f}{:8.3f}{:8.3f}' \
+                    '{:6.0f}{:6.0f}          {:>2s}{:2s}'.format(
+                        'ATOM', i+1, atom_name, ' ', resname[0:3], 
+                        'A', int(str(resid)[0:4]), ' ', 
+                        coords[i][0], coords[i][1], coords[i][2], 
+                        1, 1, ' ', ' ')]) + '\n')
+        outfile.write('TER\n')
+        outfile.close()
+

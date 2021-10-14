@@ -334,6 +334,7 @@ class Converter(object):
     def translate_coords(coords, atoms):
         n_atoms = len(atoms)
         masses = np.array([Converter._ZM[a] for a in atoms])
+        #masses = np.array([1]*n_atoms)
         _PA, _MI, com = Converter.get_principal_axes(coords, masses)
         c_translated = np.zeros((n_atoms,3))
         c_rotated = np.zeros((n_atoms,3))
@@ -341,8 +342,8 @@ class Converter(object):
             c_translated[i] = coords[i] - com
             for j in range(3):
                 c_rotated[i][j] = np.dot(c_translated[i], _PA[j])
-        return c_translated
-        #return c_rotated
+        #return c_translated
+        return c_rotated
 
     def rotate_forces(forces, coords, masses, n_atoms):
         _PA, _MI, com = Converter.get_principal_axes(coords, masses)
@@ -423,6 +424,8 @@ class Converter(object):
         #print('scale_NRF', scale_NRF)
         #print('scale_NRF_min', scale_min_NRF)
         #print(coords)
+
+        orig_coords = np.copy(coords)
         n = -1
         for i in range(n_atoms):
         #for i in range(n_atoms-1):
@@ -434,8 +437,8 @@ class Converter(object):
                 r = Converter.get_r(coords[i], coords[j])
                 #r_min = ((zA * zB) / scale) ** 0.5
                 #r_max = ((zA * zB) / scale_min) ** 0.5
-                r_min = ((zA * zB) / scale[n]) ** 0.5
-                r_max = ((zA * zB) / scale_min[n]) ** 0.5
+                r_min = ((zA * zB * Converter.au2kcalmola) / scale[n]) ** 0.5
+                r_max = ((zA * zB * Converter.au2kcalmola) / scale_min[n]) ** 0.5
                 #print(i, j, n)
                 #print('\t', r)
                 s = None
@@ -454,6 +457,10 @@ class Converter(object):
                     u = v / r
                     new_coords = coords1 + new_r * u
                     coords[j] = new_coords
+        if np.array_equal(orig_coords, coords) == False:
+            print (orig_coords)
+            print(coords)
+            print()
         #print(coords)
         return coords
 
