@@ -82,6 +82,21 @@ class Plotter(object):
                 )
         plt.close(plt.gcf())
 
+    def plot_bar(x, y, xlabel, ylabel, plot_name):
+        fig, ax = plt.subplots(figsize=(10, 10), 
+                edgecolor='k') #all in one plot
+        bar = ax.bar(x, y, width=1.0, lw=2, 
+                facecolor='None', edgecolor='k',)
+        Plotter.format(ax, x, y, xlabel, ylabel)
+        ax.xaxis.set_tick_params(direction='in', which='both')
+        ax.yaxis.set_tick_params(direction='in', which='both')
+        fig.savefig('%s' % (plot_name), 
+                transparent=True,
+                #bbox_extra_artists=(lgd,),
+                bbox_inches='tight',
+                )
+        plt.close(plt.gcf())
+
     def hist_1d(x_list, xlabel, ylabel, plot_name):
         fig, ax = plt.subplots(figsize=(10, 10), 
                 edgecolor='k') #all in one plot
@@ -89,13 +104,14 @@ class Plotter(object):
             x_min, x_max = np.min(x), np.max(x)
             x_diff = int(x_max-x_min)
             sc = ax.hist(x=x,
-                    #density=True,
+                    density=True,
                     bins=50, 
                     #bins=[x_diff], 
                     #range=[[x_min, x_max]], 
-                    alpha=0.5, 
-                    #facecolor='None',
+                    #alpha=0.5, 
+                    facecolor='None',
                     edgecolor='k',
+                    linewidth=2,
                     )
         Plotter.format(ax, x, x, xlabel, ylabel)
         fig.savefig('%s' % (plot_name), 
@@ -142,7 +158,9 @@ class Plotter(object):
         ax.xaxis.set_tick_params(direction='in', which='both')
         ax.yaxis.set_tick_params(direction='in', which='both')
         #lgd = Plotter.get_legend(ax, lines, label_list)
-        lgd = ax.legend(loc='lower right', 
+        lgd = ax.legend(
+                loc='upper right', 
+                #loc='lower right', 
                 prop={'size': Plotter.tick_labels+4})
         lgd.get_frame().set_alpha(0)
         fig.savefig('%s' % (plot_name), 
@@ -152,15 +170,15 @@ class Plotter(object):
                 )
         plt.close(plt.gcf())
 
-
     def xy_scatter(x_list, y_list, label_list, color_list, 
-            xlabel, ylabel, plot_name):
+            xlabel, ylabel, size, plot_name):
         fig, ax = plt.subplots(figsize=(10, 10), 
                 edgecolor='k') #all in one plot
         lines = []
         for x, y, label, c in zip(x_list, y_list, label_list, color_list):
             line = ax.scatter(x, y, label=label, 
-                    s=2, facecolors='none', edgecolors=c
+                    s=size, facecolors='none', 
+                    edgecolors=c, lw=2,
                     )
             lines.append(line)
         Plotter.format(ax, x, y, xlabel, ylabel)

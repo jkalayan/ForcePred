@@ -48,12 +48,13 @@ class NPParser(object):
             var.append(v)
         return var
 
-    def iterate_files(self, filename, var):
+    def iterate_files(self, filenames, var):
         n_atoms = len(self.atoms)
-        for filename in filename:
-            v = np.reshape(np.loadtxt(filename), (-1,n_atoms,3))
+        for f in filenames:
+            v = np.reshape(np.loadtxt(f), (-1,n_atoms,3))
             var.append(v)
-        var = self.get_3D_array(var, n_atoms)
+        if len(filenames) > 0:
+            var = self.get_3D_array(var, n_atoms)
         return var
 
     def get_3D_array(self, np_list, n_atoms):

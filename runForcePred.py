@@ -347,10 +347,12 @@ def run_force_pred(input_files='input_files',
 
     run_mm = True
     open('vary_qAB.txt', 'w').close()
+    open('ave_delta_F.txt', 'w').close()
     if run_mm:
         qAB_factor = 1 #0.95
-        for x in range(10):
-            nsteps = 1 #15000 #30000
+        #print(molecule.forces[0])
+        for x in range(1):
+            nsteps = 15000 #30000
             print('\nrun {} step MD with ANN potential'.format(nsteps))
             network = None
             mm = Network.run_NVE(network, molecule, timestep=0.5, 

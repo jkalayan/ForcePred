@@ -652,7 +652,7 @@ class Network(object):
 
 
         conservation = True
-        conserve_steps = nsteps #15000 #750 #3000 #150 #15000  #1875
+        conserve_steps = nsteps/100 #15000 #750 #3000 #150 #15000  #1875
         if conservation:
             dr = 0.001 #0.001
             print('\nforces are scaled to ensure energy conservation, '\
@@ -669,12 +669,12 @@ class Network(object):
         mm.coords = []
         mm.forces = []
         mm.energies = []
-        #coords_init = molecule.coords[0]
-        #'''
+        coords_init = molecule.coords[0]
+        '''
         first_frame = -1
         print('first frame {}'.format(first_frame))
         coords_init = molecule.coords[first_frame]
-        #'''
+        '''
         #sorted_i = np.argsort(molecule.energies.flatten())
         #print('\nfirst structure is index {}'.format(sorted_i[-1]))
         #coords_init = molecule.coords[sorted_i[-1]] #start with highest E
@@ -739,8 +739,8 @@ class Network(object):
         open('nn-E.txt', 'w').close()
         open('nn-KE.txt', 'w').close()
         open('nn-T.txt', 'w').close()
-        #coords_prev = coords_init
-        coords_prev = molecule.coords[first_frame-1]
+        coords_prev = coords_init
+        #coords_prev = molecule.coords[first_frame-1]
         #coords_prev = Converter.translate_coords(
                 #coords_init, atoms)
         coords_current = coords_init
@@ -861,7 +861,7 @@ class Network(object):
                 prediction = Conservation.get_conservation(
                         coords_current, prediction, 
                         molecule.atoms, scale_NRF, scale_NRF_min, scale_F, 
-                        'best_ever_model', molecule, dr, NRF_scale_method,
+                        model, molecule, dr, NRF_scale_method,
                         qAB_factor)
 
 

@@ -17,7 +17,7 @@ from ..calculate.Converter import Converter
 #from ..calculate.Plotter import Plotter
 #from ..write.Writer import Writer
 #from ..read.Molecule import Molecule
-from ..nn.Network import Network
+#from ..nn.Network import Network
 #import sys
 #import time
 
@@ -28,13 +28,13 @@ class Conservation(object):
         #self.model = None
 
     def get_conservation(coords, forces, atoms, scale_NRF, scale_NRF_min, 
-            scale_F, model_name, molecule, dr, NRF_scale_method,
+            scale_F, model, molecule, dr, NRF_scale_method,
             qAB_factor=0):
         '''scale forces to ensure forces and energies are conserved'''
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
         #dr = 0.001 #angstrom
-        model = load_model(model_name)
+        #model = load_model(model_name)
 
         all_plus_coords, all_minus_coords = \
                 Conservation.get_displaced_structures(coords, dr)
@@ -46,17 +46,6 @@ class Conservation(object):
         prediction_scaled = model.predict(_NRF_scaled)
         prediction = Conservation.get_unscaled_values(prediction_scaled, 
                 scale_F, 0, method='B')
-        recomp_forces = Network.get_recomposed_forces([coords], 
-                [prediction], n_atoms, _NC2)
-
-
-        #'''
-        open('vary_qAB.txt', 'a').write('{}\n'.format(qAB_factor))
-        print('NC2 00', prediction[0][0], qAB_factor)
-        n_structures = 1
-        for i in range(n_structures):
-            prediction[0][i] = prediction[0][i] * qAB_factor
-        #'''
 
         #positively displaced structures
         plus_NRF = Conservation.get_NRF_input(all_plus_coords, atoms, 
@@ -66,13 +55,6 @@ class Conservation(object):
         plus_prediction_scaled = model.predict(plus_NRF_scaled)
         plus_prediction = Conservation.get_unscaled_values(
                 plus_prediction_scaled, scale_F, 0, method='B')
-        plus_recomp_forces = Network.get_recomposed_forces([all_plus_coords], 
-                [plus_prediction], n_atoms, _NC2)
-        #'''
-        for h in range(n_atoms*3):
-            for i in range(n_structures):
-                plus_prediction[h][i] = plus_prediction[h][i] * qAB_factor
-        #'''
 
         #negatively displaced structures
         minus_NRF = Conservation.get_NRF_input(all_minus_coords, atoms, 
@@ -82,16 +64,34 @@ class Conservation(object):
         minus_prediction_scaled = model.predict(minus_NRF_scaled)
         minus_prediction = Conservation.get_unscaled_values(
                 minus_prediction_scaled, scale_F, 0, method='B')
-        minus_recomp_forces = Network.get_recomposed_forces(
-                [all_minus_coords], [minus_prediction], n_atoms, _NC2)
-        #'''
+
+        '''
+        ##vary some decomposed forces
+        open('vary_qAB.txt', 'a').write('{}\n'.format(qAB_factor))
+        #print(prediction, qAB_factor)
+        #print('NC2 00', prediction[0][0], qAB_factor)
+        n_structures = 1
+        for i in range(n_structures):
+            prediction[0][i] = prediction[0][i] * qAB_factor
+        for h in range(n_atoms*3):
+            for i in range(n_structures):
+                plus_prediction[h][i] = plus_prediction[h][i] * qAB_factor
         for h in range(n_atoms*3):
             for i in range(n_structures):
                 minus_prediction[h][i] = minus_prediction[h][i] * qAB_factor
-        #'''
+        '''
+
+        ##all structures recomposed forces
+        recomp_forces = Conservation.get_recomposed_forces([coords], 
+                prediction, n_atoms, _NC2)
+        plus_recomp_forces = Conservation.get_recomposed_forces(
+                all_plus_coords, plus_prediction, n_atoms, _NC2)
+        minus_recomp_forces = Conservation.get_recomposed_forces(
+                all_minus_coords, minus_prediction, n_atoms, _NC2)
+
 
         ''' ### to compare with Neil's code
-        prediction = molecule.mat_F[0]
+        prediction = np.array([molecule.mat_F[0]])
         plus_prediction = []
         minus_prediction = []
         for i in range(1,len(molecule.mat_F),6):
@@ -104,6 +104,19 @@ class Conservation(object):
                 minus_prediction.append(molecule.mat_F[i+k])
         plus_prediction = np.array(plus_prediction)
         minus_prediction = np.array(minus_prediction)
+
+        recomp_forces = np.array([molecule.forces[0]])
+        plus_recomp_forces = []
+        minus_recomp_forces = []
+        for i in range(1,len(molecule.forces),6):
+            for j in range(3):
+                plus_recomp_forces.append(molecule.forces[i+j])
+            for k in range(3,6):
+                minus_recomp_forces.append(molecule.forces[i+k])
+        plus_recomp_forces = np.array(plus_recomp_forces)
+        minus_recomp_forces = np.array(minus_recomp_forces)
+        '''
+
         '''
         #conservation check for decomposed pairwise forces
         dqBA_dC = Conservation.get_finite_difference(prediction.flatten(), 
@@ -112,12 +125,25 @@ class Conservation(object):
         q0_scaled = Conservation.check_conservation(coords, 
                 prediction.flatten(), plus_prediction, minus_prediction, 
                 dqBA_dC, n_atoms, _NC2)
+        '''
 
+        '''
         #conservation check for recomposed cartesian forces
-        dFAm_dAk = check_cartF_conservation(f0, f_plus, f_minus, dr, n_atoms)
-        print(dFAm_dAk)
+        delta_conserved = Conservation.check_cartF_conservation(
+                recomp_forces[0], plus_recomp_forces, minus_recomp_forces, 
+                dr, n_atoms)
+        ave_delta_conserved = np.sum(np.absolute(
+                delta_conserved)) / (3 * n_atoms)
+        decomp_Fscale = Converter.get_decomposition(atoms, 
+                coords, delta_conserved)
+        print(delta_conserved)
+        print(decomp_Fscale)
+        print(ave_delta_conserved)
+        print()
+        open('ave_delta_F.txt', 'a').write('{}\n'.format(ave_delta_conserved))
+        '''
 
-        return q0_scaled
+        return prediction #q0_scaled
 
     def get_displaced_structures_old(coords, dr):
         '''For each atom, displace xyz coords by dr and save as 
@@ -157,6 +183,7 @@ class Conservation(object):
         first_order_plus = False
         second_order = True
         dqBA_dC = np.zeros((3, _NC2, n_atoms))
+        #print('q', q0.shape, q_plus.shape, q_minus.shape)
         for i in range(n_atoms):
             for _N in range(_NC2):
                 qBA_plus = np.zeros((3))
@@ -175,19 +202,33 @@ class Conservation(object):
         '''Check derivatives of cartisian forces wrt r are conservative'''
         first_order_plus = False
         second_order = True
-        dFAm_dAk = np.zeros((3, n_atoms, 3))
-        for i in range(3):
-            for _N in range(n_atoms):
+        dFAm_dAk = np.zeros((3, n_atoms, 3)) 
+                #1st param = k = Ax, Ay or Az; 3rd param = m = Fx, Fy or Fz
+        #print('F', f0.shape, f_plus.shape, f_minus.shape)
+        for _N in range(n_atoms):
+            for i in range(3):
                 fA_plus = np.zeros((3))
                 fA_minus = np.zeros((3))
                 for j in range(3):
-                    fA_plus[j] = f_plus[i*3+j,_N]
-                    fA_minus[j] = f_minus[i*3+j,_N]
+                    #print(_N,i,j)
+                    fA_plus[j] = f_plus[_N*3+j,_N,i]
+                    fA_minus[j] = f_minus[_N*3+j,_N,i]
+                #print('fA_plus', fA_plus)
                 if first_order_plus:
                     dFAm_dAk[:,_N,i] = (fA_plus - f0[_N]) / dr
                 if second_order:
                     dFAm_dAk[:,_N,i] = (fA_plus - fA_minus) / (2 * dr)
-        return dFAm_dAk
+
+        delta_conserved = np.zeros((n_atoms, 3))
+        for _N in range(n_atoms):
+            delta_conserved[_N,0] = dFAm_dAk[1,_N,2] - dFAm_dAk[2,_N,1] 
+                    #dFzdy - dFydz
+            delta_conserved[_N,1] = dFAm_dAk[2,_N,0] - dFAm_dAk[0,_N,2] 
+                    #dFxdz - dFzdx
+            delta_conserved[_N,2] = dFAm_dAk[0,_N,1] - dFAm_dAk[1,_N,0] 
+                    #dFydx - dFxdy
+
+        return delta_conserved
 
 
     def check_conservation(coords, q0, q_plus, q_minus, dqBA_dC, 
@@ -264,13 +305,13 @@ class Conservation(object):
 
         #rescale original qforces by scaling factors
         q0_scaled = np.diag(scaling_factors+alpha*np.ones((_NC2,1))) * q0
-        #'''
+        '''
         for i in range(_NC2):
             print(i, scaling_factors[i]+alpha, q0[i], q0_scaled[i])
             open('vary_qAB.txt', 'a').write('{} {} {} {}\n'.format(i, 
                     scaling_factors[i]+alpha, q0[i], q0_scaled[i]))
-        print()
-        #'''
+        #print()
+        '''
 
 
         '''
@@ -332,3 +373,41 @@ class Conservation(object):
             values = (scaled_values * (scale_max - scale_min)) + scale_min
 
         return values
+
+
+
+    def get_recomposed_forces(all_coords, all_prediction, n_atoms, _NC2):
+        '''Take pairwise decomposed forces and convert them back into 
+        system forces.'''
+        all_recomp_forces = []
+        for coords, prediction in zip(all_coords, all_prediction):
+            #print(coords.shape)
+            #print(prediction.shape)
+            rij = np.zeros((3, n_atoms, n_atoms))
+                #interatomic vectors from col to row
+            eij = np.zeros((3, n_atoms, n_atoms))
+                #normalised interatomic vectors
+            q_list = []
+            for i in range(1,n_atoms):
+                for j in range(i):
+                    rij[:,i,j] = (coords[i,:] - coords[j,:])
+                    rij[:,j,i] = -rij[:,i,j]
+                    eij[:,i,j] = rij[:,i,j] / np.reshape(
+                            np.linalg.norm(rij[:,i,j], axis=0), (-1,1))
+                    eij[:,j,i] = -eij[:,i,j]
+                    q_list.append([i,j])
+            _T = np.zeros((3*n_atoms, _NC2))
+            for i in range(int(_T.shape[0]/3)):
+                for k in range(len(q_list)):
+                    if q_list[k][0] == i:
+                        _T[range(i*3, (i+1)*3), k] = \
+                                eij[:,q_list[k][0],q_list[k][1]]
+                    if q_list[k][1] == i:
+                        _T[range(i*3, (i+1)*3), k] = \
+                                eij[:,q_list[k][1],q_list[k][0]]
+            recomp_forces = np.zeros((n_atoms, 3))
+            recomp_forces = np.reshape(np.dot(_T, prediction.flatten()), 
+                    (-1,3))
+            all_recomp_forces.append(recomp_forces)
+        #print(np.array(all_recomp_forces).shape)
+        return np.array(all_recomp_forces).reshape(-1,n_atoms,3)

@@ -198,6 +198,31 @@ class Converter(object):
             all_recomp_charges.append(recomp_charges)
         return np.array(all_recomp_charges).reshape(-1,n_atoms)
 
+    def get_decomposition(atoms, coords, var):
+        n_atoms = len(atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        mat_r = np.zeros((_NC2))
+        mat_vals = np.zeros((n_atoms, 3, _NC2))
+        mat_F = [] 
+        _N = -1
+        for i in range(n_atoms):
+            zi = atoms[i]
+            for j in range(i):
+                _N += 1
+                zj = atoms[j]
+                r = Converter.get_r(coords[i], coords[j])
+                mat_r[_N] = r
+                mat_r[_N] = r
+                for x in range(0, 3):
+                    val = ((coords[i][x] - coords[j][x]) / mat_r[_N])
+                    mat_vals[i,x,_N] = val
+                    mat_vals[j,x,_N] = -val
+
+        mat_vals2 = mat_vals.reshape(n_atoms*3,_NC2)
+        var2 = var.reshape(n_atoms*3)
+        decomposed = np.matmul(np.linalg.pinv(mat_vals2), var2)
+        return decomposed
+
     def get_bias(zA, zB, r, bias_type):
         bias = 1
         if bias_type == '1/r':
@@ -342,8 +367,8 @@ class Converter(object):
             c_translated[i] = coords[i] - com
             for j in range(3):
                 c_rotated[i][j] = np.dot(c_translated[i], _PA[j])
-        #return c_translated
-        return c_rotated
+        return c_translated
+        #return c_rotated
 
     def rotate_forces(forces, coords, masses, n_atoms):
         _PA, _MI, com = Converter.get_principal_axes(coords, masses)

@@ -112,8 +112,6 @@ def run_force_pred(input_files='input_files',
     '''
 
 
-
-
     get_decomp = False
     if get_decomp:
         print(molecule)

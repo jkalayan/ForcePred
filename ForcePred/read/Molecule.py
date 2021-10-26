@@ -32,8 +32,10 @@ class Molecule(object):
     def get_ZCFE(self, other):
         self.filenames = other.filenames
         self.atoms = other.atoms
-        self.coords = self.get_3D_array(other.coords)
-        self.forces = self.get_3D_array(other.forces)
+        if len(other.coords) > 0:
+            self.coords = self.get_3D_array(other.coords)
+        if len(other.forces) > 0:
+            self.forces = self.get_3D_array(other.forces)
         if hasattr(other, 'energies'):
             if len(other.energies) > 0:
                 self.energies = self.get_2D_array(other.energies)
@@ -68,7 +70,6 @@ class Molecule(object):
                 r = self.coords[s][i] - cm
                 diff = np.cross(r, self.forces[s][i])
                 i_rot_sum = np.add(i_rot_sum, diff)
-            #print(i_rot_sum)
             i_rot_sum = np.round(np.abs(i_rot_sum), 0)
             if np.all(i_rot_sum != 0) and s not in unconserved:
                 unconserved.append(s)
@@ -81,7 +82,7 @@ class Molecule(object):
             print('rotations {}'.format(rotations))
             Molecule.remove_variants(self, unconserved)
             print('New dataset shape is', self.coords.shape, 
-                    self.forces.shape, self.energies.shape)
+                    self.forces.shape)
         return np.array(unconserved)
 
     def find_bonded_atoms(atoms, coords):
@@ -203,7 +204,8 @@ class Molecule(object):
         self.coords = np.delete(self.coords, s, axis=0)
         self.forces = np.delete(self.forces, s, axis=0)
         if hasattr(self, 'energies'):
-            self.energies = np.delete(self.energies, s, axis=0)
+            if len(self.energies) > 0:
+                self.energies = np.delete(self.energies, s, axis=0)
         if hasattr(self, 'charges'):
             self.charges = np.delete(self.charges, s, axis=0)
 

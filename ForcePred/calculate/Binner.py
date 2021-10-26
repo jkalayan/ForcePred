@@ -31,7 +31,7 @@ class Binner(object):
     def get_bond_pop(self, coords, bonds):
         for i in range(len(coords)):
             for bond in bonds:
-                bond = np.array(bond)-1 #index correctly
+                bond = np.array(bond)#-1 #index correctly
                 #v = coords[i][bond[1]] - coords[i][bond[0]]
                 #r = np.linalg.norm(v)
                 r = np.linalg.norm(coords[i][bond[1]] - 
@@ -45,7 +45,7 @@ class Binner(object):
         self.angles = np.array(angles)
         for i in range(len(coords)):
             for angle in angles:
-                angle = np.array(angle)-1 #index correctly
+                angle = np.array(angle)#-1 #index correctly
                 theta = Binner.get_angles(coords[i], angle)
                 self.thetas.append(theta)
         self.thetas = np.array(self.thetas).reshape(-1,len(angles))
@@ -56,7 +56,7 @@ class Binner(object):
         self.dihs = np.array(dihs)
         for i in range(len(coords)):
             for dih in dihs:
-                dih = np.array(dih)-1 #index correctly
+                dih = np.array(dih)#-1 #index correctly
                 phi = Binner.get_dih_angles(coords[i], dih)
                 self.phis.append(phi)
                 self.confs.append(Binner.get_conf(phi))
@@ -128,7 +128,6 @@ class Binner(object):
         rms = (rms / _N) ** 0.5
         return mae, rms
 
-
     def get_L1(all_actual, all_prediction, _N, threshold):
         '''get L1 values - the percentage of points above a threshold value'''
         all_actual = all_actual.flatten()
@@ -139,4 +138,10 @@ class Binner(object):
                 range(len(all_actual))):
             diff = prediction - actual
             mae[i] = abs(diff)
-            rms[i] = diff ** 2   
+            rms[i] = diff ** 2
+
+    def get_hist(values, n_bins):
+        hist, bin_edges = np.histogram(values, n_bins, density=True)
+        bin_edges = bin_edges[range(1, bin_edges.shape[0])]
+        return bin_edges, hist
+

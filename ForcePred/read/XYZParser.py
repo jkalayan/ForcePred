@@ -43,21 +43,23 @@ class XYZParser(object):
         for atom in input_:
             self.atoms.append(int(atom))
 
-    def iterate_files(self, filename, var):
+    def iterate_files(self, filenames, var):
         n_atoms = len(self.atoms)
-        for filename in filename:
-            v = np.reshape(np.loadtxt(filename), (-1,1))
+        for f in filenames:
+            v = np.reshape(np.loadtxt(f), (-1,1))
             var.append(v)
-        var = self.get_2D_array(var)
+        if len(filenames) > 0:
+            var = self.get_2D_array(var)
         return var
 
-    def iterate_xyz_files(self, filename, var):
-        for filename in filename:
-            input_ = open(filename, 'r')
+    def iterate_xyz_files(self, filenames, var):
+        for f in filenames:
+            input_ = open(f, 'r')
             for line in input_:
                 xyz = self.clean(self.extract(1, input_))
                 var.append(xyz)
-        var = self.get_3D_array(var, len(self.atoms))
+        if len(filenames) > 0:
+            var = self.get_3D_array(var, len(self.atoms))
         return var
 
     def extract(self, padding, input_):
