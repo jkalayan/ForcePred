@@ -82,11 +82,15 @@ class OPTParser(object):
                     if 'SCF Done:' in line:
                         energy = float(line.split()[4]) \
                                 * Converter.Eh2kcalmol
+                                #* Converter.Eh2kJmol ##!!!!!!
+
                         #print('e', energy)
                     if 'Axes restored to original set' in line:
                         force = self.clean(self.extract(4, input_), 3) \
-                                * Converter.au2kcalmola
+                                * Converter.Eh2kcalmol / Converter.au2Ang
                                 #* Converter.au2kJmola ##!!!!!!!
+
+
 
                         #print('f', force.shape)
                     if 'Mulliken charges:' in line:

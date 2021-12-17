@@ -106,7 +106,8 @@ class Binner(object):
         RSE = np.sqrt((baseline-values)**2)
         #print(np.amax(RSE))
         #print(np.sqrt(np.sum((baseline-values)**2)/values.shape[0]))
-        hist, bin_edges = np.histogram(RSE,1000,(-1,100))
+        #hist, bin_edges = np.histogram(RSE,1000,(-1,100))
+        hist, bin_edges = np.histogram(RSE,1000,(-1,np.amax(RSE)))
         hist = np.cumsum(hist)
         #print(bin_edges.shape)
         bin_edges = bin_edges[range(1,bin_edges.shape[0])]
@@ -116,7 +117,7 @@ class Binner(object):
         return bin_edges, hist
 
     def get_error(all_actual, all_prediction):
-        '''Get RMS and MAE for array values'''
+        '''Get one RMS and one MAE for array values'''
         _N = np.size(all_actual)
         mae = 0
         rms = 0
@@ -126,6 +127,13 @@ class Binner(object):
             rms += np.sum(diff ** 2)
         mae = mae / _N
         rms = (rms / _N) ** 0.5
+        return mae, rms
+
+    def get_each_error(actual, prediction):
+        '''Get RMS and MAE for each array'''
+        diff = prediction - actual
+        mae = abs(diff)
+        rms = diff ** 2
         return mae, rms
 
     def get_L1(all_actual, all_prediction, _N, threshold):

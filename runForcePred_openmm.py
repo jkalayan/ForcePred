@@ -21,6 +21,7 @@ from ForcePred import Molecule, OPTParser, NPParser, Converter, \
         Writer, Plotter, Network, Conservation
 
 from keras.models import Model, load_model    
+from keras import backend as K                                              
 import sys
 #import numpy as np
 #from itertools import islice
@@ -34,7 +35,7 @@ def run_force_pred(input_files='input_files',
         force_files='force_files', energy_files='energy_files',
         charge_files='charge_files', list_files='list_files'):
 
-
+    prescale = 0
     '''
     #ethanediol    
     scale_NRF = 19911.051275945494
@@ -43,12 +44,42 @@ def run_force_pred(input_files='input_files',
     scale_F_min = 0
     '''
 
-    #'''
-    #malonaldehyde 
+
+
+    '''
+    #malonaldehyde, Ismaeel's model 
     scale_NRF = 12364.344210692281
     scale_NRF_min = 15.377554794644805
     scale_F = 102.58035961189837
     scale_F_min = 2.4191760310543486e-06
+    '''
+
+    '''
+    #malonaldehyde, mat_FE 
+    scale_NRF = 13088.721638547617 
+    scale_NRF_min = 14.486865558162252
+    #scale_F = 126.29971953477138 #FE
+    scale_F = 841.9491922467108
+    #scale_F_min = 1.0744157206588056e-05 #FE
+    scale_F_min = 6.629708034999737e-05
+    prescale = [167514.2130896381, 100]
+    '''
+
+    '''
+    #aspirin 
+    scale_NRF = 13036.56150157717
+    scale_NRF_min = 4.296393449372179 
+    scale_F = 114.0951589972158
+    scale_F_min = 1.1633573357150429e-06
+    '''
+
+    #'''
+    #aspirin, mat_FE 
+    scale_NRF = 12937.753800681738 
+    scale_NRF_min = 4.294291997641176
+    scale_F = 709.2726636527714
+    scale_F_min = 5.839251453920724e-06
+    prescale = [406757.5912640221, 213.3895117696644]
     #'''
 
 
@@ -56,6 +87,7 @@ def run_force_pred(input_files='input_files',
     print(startTime)
     print('get molecule')
     molecule = Molecule() #initiate molecule class
+    #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
     #XYZParser(atom_file, coord_files, force_files, energy_files, molecule)
     NPParser(atom_file, coord_files, force_files, [], molecule)
     pdb_file = 'molecules.pdb'
@@ -70,15 +102,74 @@ def run_force_pred(input_files='input_files',
     sys.stdout.flush()
 
     print('get MD system')
-    system, simulation, force = OpenMM.get_system(masses, pdb_file)
+    system, simulation, force, integrator, init_positions, init_forces = \
+            OpenMM.get_system(masses, pdb_file)
     sys.stdout.flush()
 
     print('run MD simulation')
-    nsteps = 100000 #000 #10ns #100ps #20000 #10ps  #15000
-    saved_steps = nsteps/5 #/1000
-    model = load_model('../../best_ever_model')
-    system, simulation, md = OpenMM.run_md(system, simulation, force, 
-            molecule.atoms, network, model, nsteps, saved_steps)
+    nsteps = 200_00#0_000 #100ns #25_000_000 #12.5ns 20000 #10ps
+    saved_steps = nsteps#/10#000#000
+    print('nsteps: {} saved_steps: {}'.format(nsteps, saved_steps))
+    #model = load_model('../../best_ever_model')
+
+    #setup object for collecting simulation results
+    md = Molecule()
+    md.atoms = molecule.atoms
+    md.coords = []
+    md.forces = []
+    md.energies = []
+
+    #################################################################
+    ###for sum energy model with custom loss
+    n_atoms = len(molecule.atoms)
+    _NC2 = int(n_atoms * (n_atoms-1)/2)
+    c_loss = False
+    if c_loss:
+        def custom_loss1(weights):
+            def custom_loss(y_true, y_pred):
+                return K.mean(K.abs(y_true - y_pred) * weights)
+            return custom_loss
+
+        weights = np.zeros((_NC2+1)) #np.ones((_NC2+1))
+        weights[-1] = 1 #sumE_weight
+        cl = custom_loss1(weights)
+        model = load_model('../best_ever_model', 
+                custom_objects={'custom_loss': custom_loss1(weights)})
+    else:
+        #model = load_model('../../best_ever_model')
+        model = load_model('best_ever_model')
+    #################################################################
+
+    ##write new files here first
+    open('openmm-coords.xyz', 'w').close()
+    open('openmm-forces.txt', 'w').close()
+    open('openmm-velocities.txt', 'w').close()
+    open('openmm-delta_energies.txt', 'w').close()
+    open('openmm-f-curl.txt', 'w').close()
+    #'''
+    #no ramp
+    temperature = 0
+    system, simulation, md = OpenMM.run_md(system, simulation, md, force, 
+            integrator, temperature, network, model, 
+            nsteps, saved_steps, init_positions, init_forces, prescale)
+    #'''
+
+    '''
+    #ramp temp
+    for temperature in range(300,1001,50):
+        if temperature < 800:
+            nsteps = 5000
+        if temperature >= 800:
+            nsteps = 20000
+        saved_steps = nsteps/10#000#000
+        print('nsteps: {} saved_steps: {}'.format(nsteps, saved_steps))
+        system, simulation, md = OpenMM.run_md(system, simulation, md, force, 
+                integrator, temperature, network, model, 
+                nsteps, saved_steps, init_positions, init_forces, prescale)
+    '''
+
+
+    
     print(datetime.now() - startTime)
     sys.stdout.flush()
 
@@ -104,7 +195,8 @@ def run_force_pred(input_files='input_files',
             np.amin(molecule.mat_NRF), np.amax(molecule.mat_NRF),
             np.amin(np.absolute(molecule.mat_F)), 
             np.amax(np.absolute(molecule.mat_F))))
-        model = load_model('../best_ever_model')
+        model = load_model('../../best_ever_model')
+        #model = load_model('best_ever_model')
         train_prediction_scaled = model.predict(scaled_input)
         train_prediction = Network.get_unscaled_values(
                 train_prediction_scaled, 

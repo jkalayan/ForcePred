@@ -3,13 +3,15 @@
 '''
 This module is for running a NN with a training set of data.
 '''
-
+from __future__ import print_function #for tf printing
 import numpy as np
-from keras.layers import Input, Dense, concatenate, Layer, initializers, Add  
+from keras.layers import Input, Dense, Lambda, concatenate, Layer, \
+        initializers, Add, Multiply
 from keras.models import Model, load_model                                   
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from keras import backend as K                                              
 import tensorflow as tf
+from functools import partial
 from ..calculate.MM import MM
 from ..calculate.Converter import Converter
 from ..calculate.Binner import Binner
@@ -19,6 +21,15 @@ from ..read.Molecule import Molecule
 from ..calculate.Conservation import Conservation
 import sys
 import time
+
+'''
+import tensorflow as tf
+sess = tf.Session()
+
+from keras import backend as K
+K.set_session(sess)
+'''
+
 
 class Network(object):
     '''
@@ -48,10 +59,504 @@ class Network(object):
 
         return network
 
+
+    def print_tensor(a):
+        with tf.Session() as sess: #to get tensor to numpy
+            sess.run(tf.global_variables_initializer())
+            x = sess.run(a)
+            print(x)
+
+    def return_tensor(a):
+        with tf.Session() as sess: #to get tensor to numpy
+            sess.run(tf.global_variables_initializer())
+            a = sess.run(a)
+        return a
+
+
+    @tf.function
+    def get_FE_eij_matrix(decompFE, coords, atoms, n_atoms, _NC2):
+        '''2. From network decomposed FEs, need an eij matrix
+        to recompose decompFE to 3N CartF + molecular E within the network
+        '''
+        atoms = tf.convert_to_tensor(atoms, dtype=tf.float32)
+        coords = tf.reshape(coords, [-1,n_atoms,3])
+        n_structures = 1 #coords.shape[0]
+        i = tf.constant(0)
+        j = tf.constant(0)
+        _N = tf.constant(-1)
+        s = tf.constant(0)
+        eij = tf.zeros((n_structures,n_atoms*3+1,_NC2))
+
+        def cond3(i, j, _N, x, s, eij, r):
+            return tf.less(x, 3)
+
+        def body3(i, j, _N, x, s, eij, r):
+            val = tf.divide(tf.subtract(coords[s][i][x], coords[s][j][x]), r)
+            minus_val = tf.negative(val)
+
+            index = [[s,i*3+x,_N]]
+            value = [val]
+            shape = [n_structures,n_atoms*3+1,_NC2]
+            delta = tf.SparseTensor(index, value, shape)
+            result = eij + tf.sparse_tensor_to_dense(delta)
+            eij = result
+
+            index = [[s,j*3+x,_N]]
+            value = [minus_val]
+            shape = [n_structures,n_atoms*3+1,_NC2]
+            delta = tf.SparseTensor(index, value, shape)
+            result = eij + tf.sparse_tensor_to_dense(delta)
+            eij = result
+
+            x = tf.add(x, 1)
+            return i, j, _N, x, s, eij, r
+
+        def cond2(i, j, _N, s, eij):
+            return tf.less(j, i)
+
+        def body2(i, j, _N, s, eij):
+            _N = tf.add(_N, 1)
+            x = tf.constant(0)
+            r = tf.linalg.norm(tf.math.subtract(coords[s][i], coords[s][j]))
+            #for forces
+            i, j, _N, x, s, eij, r = tf.while_loop(cond3, body3, 
+                    [i, j, _N, x, s, eij, r])
+            #for energies
+            recip_r = tf.reciprocal(r)
+            index = [[s,n_atoms*3,_N]]
+            value = [recip_r]
+            shape = [n_structures,n_atoms*3+1,_NC2]
+            delta = tf.SparseTensor(index, value, shape)
+            result = eij + tf.sparse_tensor_to_dense(delta)
+            eij = result
+
+            j = tf.add(j, 1)
+            return i, j, _N, s, eij
+
+        def cond1(i, j, _N, s, eij):
+            return tf.less(i, n_atoms)
+
+        def body1(i, j, _N, s, eij):
+            i, j, _N, s, eij = tf.while_loop(cond2, body2, 
+                    [i, j, _N, s, eij])
+            i = tf.add(i, 1)
+            j = tf.constant(0)
+            return [i, j, _N, s, eij]
+
+        def cond(i, j, _N, s, eij):
+            return tf.less(s, n_structures)
+
+        def body(i, j, _N, s, eij):
+            i, j, _N, s, eij = tf.while_loop(cond1, body1, 
+                    [i, j, _N, s, eij])
+            s = tf.add(s, 1)
+            i = tf.constant(0)
+            _N = tf.constant(-1)
+            return [i, j, _N, s, eij]
+
+        res = tf.while_loop(cond, body, [i, j, _N, s, eij])
+        eij = tf.reshape(res[4], [n_structures,n_atoms*3+1,_NC2])
+        decompFE = tf.reshape(decompFE, [n_structures,_NC2])
+        recompFE = tf.einsum("ijk, ik -> ij", eij, decompFE)
+        #return recompFE.eval(session=tf. compat. v1. Session())
+        return recompFE
+
+
+
+    @tf.function
+    def get_NRF_from_coords(coords, atoms, n_atoms, _NC2):
+        '''1. Use tensors to get NRF from coords, can't use for loops in tf,
+        so have to use nested while loops to iterate over i and j atoms.
+        '''
+        atoms = tf.convert_to_tensor(atoms, dtype=tf.float32)
+        coords = tf.reshape(coords, [-1,n_atoms,3])
+        n_structures = 1 #coords.shape[0]
+        i = tf.constant(0)
+        j = tf.constant(0)
+        _N = tf.constant(-1)
+        s = tf.constant(0)
+        _NRF = tf.zeros((n_structures,_NC2))
+
+        def cond3(i, j, _N, s, _NRF):
+            return tf.less(j, i)
+
+        def body3(i, j, _N, s, _NRF):
+            _N = tf.add(_N, 1)
+
+            r = tf.linalg.norm(tf.math.subtract(coords[s][i], coords[s][j]))
+            zizj = tf.multiply(atoms[i], atoms[j])
+            zizj = tf.multiply(zizj, Converter.au2kcalmola)
+            ij_NRF = tf.divide(zizj, tf.square(r))
+
+            index = [[s,_N]]
+            value = [ij_NRF]
+            shape = [n_structures,_NC2]
+            delta = tf.SparseTensor(index, value, shape)
+            result = _NRF + tf.sparse_tensor_to_dense(delta)
+            _NRF = result
+
+            j = tf.add(j, 1)
+            return i, j, _N, s, _NRF
+
+        def cond2(i, j, _N, s, _NRF):
+            return tf.less(i, n_atoms)
+
+        def body2(i, j, _N, s, _NRF):
+            i, j, _N, s, _NRF = tf.while_loop(cond3, body3, 
+                    [i, j, _N, s, _NRF])
+            i = tf.add(i, 1)
+            j = tf.constant(0)
+            return i, j, _N, s, _NRF
+
+        def cond1(i, j, _N, s, _NRF):
+            return tf.less(s, n_structures)
+
+        def body1(i, j, _N, s, _NRF):
+            i, j, _N, s, _NRF = tf.while_loop(cond2, body2, 
+                    [i, j, _N, s, _NRF])
+            s = tf.add(s, 1)
+            i = tf.constant(0)
+            _N = tf.constant(-1)
+            return [i, j, _N, s, _NRF]
+
+        res = tf.while_loop(cond1, body1, [i, j, _N, s, _NRF])
+        res = tf.reshape(res[4], [n_structures,_NC2])
+        return res
+
+
+    def get_coord_FE_model(self, molecule):
+        '''Input coordinates and z_types into model to get NRFS which then 
+        are used to predict decompFE, which are then recomposed to give
+        Csrt Fs and molecular E, both of which could be used in the loss
+        function, could weight the E or Fs as required.
+        '''
+        n_atoms = len(molecule.atoms)
+        #n_structures = len(molecule.coords)
+        #print('n_structures', n_structures)
+        _NC2 = int(n_atoms*(n_atoms-1)/2)
+        atoms = np.array([float(i) for i in molecule.atoms], dtype='float32')
+        #atoms = tf.constant(np.array([float(i) for i in molecule.atoms]),
+                #dtype=tf.float32)
+        coords = tf.constant(np.copy(molecule.coords[0]), dtype=tf.float32)
+        _NRF = Network.get_NRF_from_coords(tf.reshape(coords, 
+                [-1,3*n_atoms]), atoms, n_atoms, _NC2)
+        print('tf NRF:')
+        Network.print_tensor(_NRF[0])
+        print(_NRF.shape)
+        print('NRF:', molecule.mat_NRF[0])
+
+        decompFE = tf.constant(molecule.mat_FE[0], dtype=tf.float32)
+        recompFE = Network.get_FE_eij_matrix(tf.reshape(decompFE, 
+                [-1,_NC2]), tf.reshape(coords, 
+                [-1,3*n_atoms]), atoms, n_atoms, _NC2)
+        print('tf recompFE:')
+        Network.print_tensor(recompFE[0])
+        print(recompFE.shape)
+        print()
+        sys.stdout.flush()
+
+        sys.exit()
+
+
+        end=1
+        input = molecule.coords[0:end].reshape(-1,n_atoms*3)
+        output = np.concatenate((molecule.forces[0:end].reshape(-1,n_atoms*3), 
+                molecule.energies[0:end].reshape(-1,1)), axis=1)
+        #n_structures = len(input)
+        print(input.shape, output.shape)
+
+        mc = ModelCheckpoint(
+                'model.h5', 
+                monitor='loss', mode='min', 
+                save_best_only=True)
+        es = EarlyStopping(monitor='loss', patience=500)
+
+        coords_layer = Input(shape=(n_atoms*3,), name='coords_layer')
+        NRF_layer = Lambda(Network.get_NRF_from_coords, 
+                input_shape=(n_atoms*3,), output_shape=(_NC2,), 
+                name='NRF_layer', arguments={'atoms':atoms, 
+                'n_atoms':n_atoms, '_NC2':_NC2})(coords_layer)
+        net_layer = Dense(units=1000, activation='relu', 
+                name='net_layer')(NRF_layer)
+        decomp_layer = Dense(units=_NC2, activation='linear', 
+                name='decomp_layer')(net_layer)
+        recompFE_layer = Lambda(Network.get_FE_eij_matrix,
+                input_shape=(_NC2,), output_shape=(n_atoms*3+1,),
+                name='recompFE_layer', arguments={'coords':coords_layer, 
+                'atoms':atoms, 'n_atoms':n_atoms, '_NC2':_NC2})(decomp_layer)
+        model = Model(coords_layer, recompFE_layer)
+        model.compile(loss='mse', optimizer='adam', 
+                metrics=['mae', 'acc']) #mean abs error, accuracy
+        model.summary()
+        sys.stdout.flush()
+
+
+        model.fit(input, output, epochs=1000, verbose=2,
+                #callbacks=[es],
+                #callbacks=[es,mc],
+                )
+
+        #model = load_model('model.h5')
+        print('train', model.evaluate(input, output, verbose=2))
+
+        pred_input = molecule.coords[0].reshape(-1,n_atoms*3)
+        print(pred_input.shape) 
+        prediction = model.predict(pred_input)
+        print('\npred', prediction)
+        print('\nactual', molecule.forces[0], molecule.energies[0])
+
+
+    def get_decompE_sum_model(self, molecule, nodes, input, output):
+        start_time = time.time()
+        n_atoms = len(molecule.atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        n_nodes = nodes #1000
+        n_epochs = 100000 #100000
+        sumE_weight = 1
+        print('summed E weighted by: {}'.format(sumE_weight))
+        input_scale_method = 'A'
+        output_scale_method = 'D'
+
+        train_input = input
+        train_output = output
+
+        train = True #False
+        if train:
+            train_input = np.take(input, molecule.train, axis=0)
+            train_output = np.take(output, molecule.train, axis=0)
+
+
+        scaled_input, self.scale_input_max, self.scale_input_min = \
+                Network.get_scaled_values(train_input, np.amax(train_input), 
+                np.amin(train_input), method=input_scale_method)
+        print('INPUT: \nscale_max: {}\nscale_min: {}'\
+                '\nnstructures: {}\n'.format(
+                self.scale_input_max, self.scale_input_min, len(train_input)))
+        scaled_output, self.scale_output_max, self.scale_output_min = \
+                Network.get_scaled_values(train_output, 
+                np.amax(np.absolute(train_output)), 
+                #np.amax(np.absolute(np.sum(train_output, axis=1))), 
+                np.amin(np.absolute(train_output)), 
+                #np.amin(np.absolute(np.sum(train_output, axis=1))), 
+                method=output_scale_method)
+        sum_output = np.sum(scaled_output, axis=1).reshape(-1,1)
+        all_scaled_output = np.concatenate((scaled_output, sum_output), 
+                axis=1)
+        #all_scaled_output = sum_output
+        print('OUTPUT: \nscale_max: {}\nscale_min: {}'\
+                '\nnstructures: {}\n'.format(
+                self.scale_output_max, self.scale_output_min, 
+                len(train_output)))
+
+        print('input shape: {}'.format(scaled_input.shape))
+        print('output shape: {}'.format(scaled_output.shape))
+
+
+        #setup network with a Lambda layer output concatenated to the output
+        #NC2 + 1 outputs
+
+        def sum_layer(x):
+            #y = K.sum(x)
+            y = K.sum(x,axis=1,keepdims=True)
+            return y
+
+        def custom_loss1(weights):
+            def custom_loss(y_true, y_pred):
+                return K.mean(K.abs(y_true - y_pred) * weights)
+            return custom_loss
+
+        #train network
+        max_depth = 1 #6
+        best_error = 10000
+        file_name = 'best_model'
+        #file_name = 'best_ever_model'
+        mc = ModelCheckpoint(file_name, monitor='loss', 
+                mode='min', 
+                save_best_only=True)
+        es = EarlyStopping(monitor='loss', 
+                patience=500)
+        model_in = Input(shape=(scaled_input.shape[1],))
+        model = model_in
+
+        #weights = np.ones((scaled_input.shape[0], _NC2+1))
+        #weights[:,-1] = sumE_weight #weight the total E to be 10x 
+                #more important than decompsed Es
+        weights = np.zeros((_NC2+1)) #np.ones((_NC2+1)) #
+        weights[-1] = sumE_weight
+        #print(weights, weights.shape)
+        #weights_tensor = Input(shape=(_NC2+1,))
+        #cl = partial(custom_loss1, weights=weights_tensor)
+        cl = custom_loss1(weights)
+
+
+        for i in range(0, max_depth):
+            print('i', i)
+            if i > 0:
+                model = concatenate([model,model_in])
+
+            net = Dense(units=n_nodes, activation='sigmoid')(model_in)
+            net = Dense(units=scaled_output.shape[1], 
+                    activation='sigmoid')(net)
+            net2 = Lambda(sum_layer, name='sum_layer')(net)
+            net = concatenate([net, net2])
+
+            model = Model(model_in, net)
+            #model = Model([model, weights_tensor], net)
+            model.summary()
+
+            model.compile(loss=cl,
+                    #loss='mse', 
+                    optimizer='adam', 
+                    metrics=['mae', 'acc']) #mean abs error, accuracy
+            model.fit(
+                    scaled_input, 
+                    #[scaled_input, weights], 
+                    all_scaled_output, 
+                    epochs=n_epochs, verbose=2, 
+                    callbacks=[mc,es]
+                    )
+
+            #'''
+            model = load_model(file_name, 
+                    custom_objects={'custom_loss': custom_loss1(weights)})
+            if model.evaluate(scaled_input, all_scaled_output, 
+                    verbose=0)[0] < best_error:
+                model.save('best_ever_model')
+                best_error = model.evaluate(scaled_input, all_scaled_output, 
+                        verbose=0)[0]
+                print('best model was achieved on layer %d' % i)
+                print('its error was: {}'.format(best_error))
+                #_, accuracy = model.evaluate(scaled_input, scaled_output)
+                #print('accuracy: {}'.format(accuracy * 100))
+                #print()
+            print()
+            #'''
+            #end_training = np.loadtxt('end_file', dtype=int)
+            #if end_training == 1:
+                #break
+            #if time.time()-start_time >= 518400: #5 days
+            if time.time()-start_time >= 302400: #3.5 days
+                print('\n*** Time limit reached, ending training ***')
+                break
+            model = load_model(file_name, 
+                    custom_objects={'custom_loss': custom_loss1(weights)})
+            model.trainable = False
+            model = model(model_in)
+
+
+
+
+        #model = load_model('best_ever_model')
+        model = load_model('best_ever_model', 
+                custom_objects={'custom_loss': custom_loss1(weights)})
+        print('train', model.evaluate(scaled_input, all_scaled_output, 
+                verbose=2))
+        train_prediction_scaled = model.predict(scaled_input)
+        train_prediction_scaled = train_prediction_scaled[:,:-1]
+        train_prediction = Network.get_unscaled_values(
+                train_prediction_scaled, 
+                self.scale_output_max, self.scale_output_min, 
+                method=output_scale_method)
+        pred_sumE = np.sum(train_prediction, axis=1).reshape(1,-1)
+        print('pred:', pred_sumE)
+        #print(train_output)
+        actual_sumE = np.sum(train_output, axis=1).reshape(1,-1)
+        print('actual', actual_sumE)
+        sum_Es = np.concatenate((actual_sumE, pred_sumE))
+        np.savetxt('actual-pred-sumE.txt', sum_Es.T)
+        train_mae, train_rms = Binner.get_error(actual_sumE.flatten(), 
+                    pred_sumE.flatten())
+        print('sumE errors MAE: {} RMS: {}'.format(train_mae, train_rms)) 
+
+
+        atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) for z, n in 
+                zip(molecule.atoms, range(1,len(molecule.atoms)+1))]
+        atom_pairs = []
+        for i in range(len(molecule.atoms)):
+            for j in range(i):
+                atom_pairs.append('{}_{}'.format(atom_names[i], 
+                    atom_names[j]))
+
+        input_header = 'input'
+        if len(scaled_input[0]) == _NC2:
+            input_header = ['input_' + s for s in atom_pairs]
+            input_header = ','.join(input_header)
+        output_header = 'output'
+        if len(scaled_output[0]) == _NC2:
+            output_header = ['output_' + s for s in atom_pairs]
+            output_header = ','.join(output_header)
+        prediction_header = 'prediction'
+        if len(train_prediction[0]) == _NC2:
+            prediction_header = ['prediction_' + s for s in atom_pairs]
+            prediction_header = ','.join(prediction_header)
+        header = input_header + ',' + output_header + ',' + prediction_header
+        #header = 'input,output,prediction'
+ 
+        Writer.write_csv([train_input, train_output, train_prediction], 
+                'trainset_inp_out_pred', header)
+
+
+        test_input = np.take(input, molecule.test, axis=0)
+        test_output = np.take(output, molecule.test, axis=0)
+
+        weights_test = np.ones((_NC2+1))
+        weights_test[-1] = sumE_weight 
+        model = load_model('best_ever_model', 
+                custom_objects={'custom_loss': custom_loss1(weights_test)})
+
+        scaled_input_test, scale_input_max, scale_input_min = \
+                Network.get_scaled_values(test_input, np.amax(train_input), 
+                np.amin(train_input), method=input_scale_method)
+        scaled_output_test, scale_output_max, scale_output_min = \
+                Network.get_scaled_values(test_output, 
+                np.amax(np.absolute(train_output)), 
+                np.amin(np.absolute(train_output)), 
+                method=output_scale_method)
+        sum_output_test = np.sum(scaled_output_test, axis=1).reshape(-1,1)
+        all_scaled_output_test = np.concatenate((scaled_output_test, 
+                sum_output_test), axis=1)
+        print('test', model.evaluate(scaled_input_test, 
+            all_scaled_output_test, verbose=2))
+        test_prediction_scaled = model.predict(scaled_input_test)
+        test_prediction_scaled = test_prediction_scaled[:,:-1]
+        test_prediction = Network.get_unscaled_values(test_prediction_scaled, 
+                self.scale_output_max, self.scale_output_min, 
+                method=output_scale_method)
+
+        train_mae, train_rms = Binner.get_error(train_output.flatten(), 
+                    train_prediction.flatten())
+
+        test_mae, test_rms = Binner.get_error(test_output.flatten(), 
+                    test_prediction.flatten())
+
+        print('\nTrain MAE: {} \nTrain RMS: {} \nTest MAE: {} '\
+                '\nTest RMS: {}'.format(train_mae, train_rms, 
+                test_mae, test_rms))
+
+        scurves = True
+        if scurves:
+            train_bin_edges, train_hist = Binner.get_scurve(
+                    train_output.flatten(), 
+                    train_prediction.flatten(), 
+                    'train-hist.txt')
+
+            test_bin_edges, test_hist = Binner.get_scurve(
+                    test_output.flatten(), #actual
+                    test_prediction.flatten(), #prediction
+                    'test-hist.txt')
+           
+            Plotter.plot_2d([train_bin_edges, test_bin_edges], 
+                    [train_hist, test_hist], ['train', 'test'], 
+                    'Error', '% of points below error', 's-curves.png')
+
+
+
     def get_variable_depth_model(self, molecule, nodes, input, output):
         start_time = time.time()
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
+        input_scale_method = 'A'
+        output_scale_method = 'B'
 
         ###sort input and output by equivalent atoms
         equiv_atoms = False
@@ -88,29 +593,37 @@ class Network(object):
             #print('\ntrain_output', train_output)
 
 
+        with_atom_F = False
+        if with_atom_F:
+            train_input = train_input.reshape(-1,_NC2)
+            train_output = train_output.reshape(-1,_NC2)
+
+        '''
         ###save max and min values for decomp forces to file
         #print(train_output.shape)
         max_NRFs = np.amax(train_input, axis=0)
-        np.savetxt('max_NRFs.txt', max_NRFs)
+        np.savetxt('max_inputs.txt', max_NRFs)
         min_NRFs = np.amin(train_input, axis=0)
-        np.savetxt('min_NRFs.txt', min_NRFs)
+        np.savetxt('min_inputs.txt', min_NRFs)
 
         max_Fs = np.amax(train_output, axis=0)
-        np.savetxt('max_decompFs.txt', max_Fs)
+        np.savetxt('max_outputs.txt', max_Fs)
         min_Fs = np.amin(train_output, axis=0)
-        np.savetxt('min_decompFs.txt', min_Fs)
+        np.savetxt('min_outputs.txt', min_Fs)
         #sys.exit()
+        '''
 
         scaled_input, self.scale_input_max, self.scale_input_min = \
                 Network.get_scaled_values(train_input, np.amax(train_input), 
-                np.amin(train_input), method='C')
+                np.amin(train_input), method=input_scale_method)
         print('INPUT: \nscale_max: {}\nscale_min: {}'\
                 '\nnstructures: {}\n'.format(
                 self.scale_input_max, self.scale_input_min, len(train_input)))
         scaled_output, self.scale_output_max, self.scale_output_min = \
                 Network.get_scaled_values(train_output, 
                 np.amax(np.absolute(train_output)), 
-                np.amin(np.absolute(train_output)), method='B')
+                np.amin(np.absolute(train_output)), 
+                method=output_scale_method)
         print('OUTPUT: \nscale_max: {}\nscale_min: {}'\
                 '\nnstructures: {}\n'.format(
                 self.scale_output_max, self.scale_output_min, 
@@ -126,8 +639,8 @@ class Network(object):
         print('input shape: {}'.format(scaled_input.shape))
         print('output shape: {}'.format(scaled_output.shape))
         max_depth = 1 #6
-        #file_name = 'best_model'
-        file_name = 'best_ever_model'
+        file_name = 'best_model'
+        #file_name = 'best_ever_model'
         mc = ModelCheckpoint(file_name, monitor='loss', 
                 mode='min', save_best_only=True)
         es = EarlyStopping(monitor='loss', patience=500)
@@ -139,46 +652,48 @@ class Network(object):
         print('max depth: {}\nn_nodes: {}\nn_epochs: {}'.format(
                 max_depth, n_nodes, n_epochs))
 
-        for i in range(0, max_depth):
-            if i > 0:
-                model = concatenate([model,model_in])
-            net = Dense(units=n_nodes, activation='sigmoid')(model)
-            #net = Dense(units=scaled_input.shape[1], 
-                    #activation='sigmoid')(net)
-            net = Dense(units=scaled_output.shape[1], 
-                    activation='sigmoid')(net)
-            model = Model(model_in, net)
-            model.compile(loss='mse', optimizer='adam', 
-                    metrics=['mae', 'acc']) #mean abs error, accuracy
-            model.summary()
-            model.fit(scaled_input, scaled_output, epochs=n_epochs, 
-                    verbose=2, callbacks=[mc,es])
+        train_net = False
+        if train_net:
+            for i in range(0, max_depth):
+                if i > 0:
+                    model = concatenate([model,model_in])
+                net = Dense(units=n_nodes, activation='sigmoid')(model)
+                #net = Dense(units=scaled_input.shape[1], 
+                        #activation='sigmoid')(net)
+                net = Dense(units=scaled_output.shape[1], 
+                        activation='sigmoid')(net)
+                model = Model(model_in, net)
+                model.compile(loss='mse', optimizer='adam', 
+                        metrics=['mae', 'acc']) #mean abs error, accuracy
+                model.summary()
+                model.fit(scaled_input, scaled_output, epochs=n_epochs, 
+                        verbose=2, callbacks=[mc,es])
 
-            '''
-            model = load_model(file_name)
-            if model.evaluate(scaled_input, scaled_output, 
-                    verbose=0)[0] < best_error:
-                model.save('best_ever_model')
-                best_error = model.evaluate(scaled_input, scaled_output, 
-                        verbose=0)[0]
-                print('best model was achieved on layer %d' % i)
-                print('its error was: {}'.format(best_error))
-                #_, accuracy = model.evaluate(scaled_input, scaled_output)
-                #print('accuracy: {}'.format(accuracy * 100))
-                #print()
-                print()
-            '''
-            #end_training = np.loadtxt('end_file', dtype=int)
-            #if end_training == 1:
-                #break
-            #if time.time()-start_time >= 518400: #5 days
-            if time.time()-start_time >= 302400: #3.5 days
-                print('\n*** Time limit reached, ending training ***')
-                break
-            model = load_model(file_name)
-            model.trainable = False
-            model = model(model_in)
-        self.model = model
+                #'''
+                model = load_model(file_name)
+                if model.evaluate(scaled_input, scaled_output, 
+                        verbose=0)[0] < best_error:
+                    model.save('best_ever_model')
+                    best_error = model.evaluate(scaled_input, scaled_output, 
+                            verbose=0)[0]
+                    print('best model was achieved on layer %d' % i)
+                    print('its error was: {}'.format(best_error))
+                    #_, accuracy = model.evaluate(scaled_input, scaled_output)
+                    #print('accuracy: {}'.format(accuracy * 100))
+                    #print()
+                    print()
+                #'''
+                #end_training = np.loadtxt('end_file', dtype=int)
+                #if end_training == 1:
+                    #break
+                #if time.time()-start_time >= 518400: #5 days
+                if time.time()-start_time >= 302400: #3.5 days
+                    print('\n*** Time limit reached, ending training ***')
+                    break
+                model = load_model(file_name)
+                model.trainable = False
+                model = model(model_in)
+            self.model = model
 
         model = load_model('best_ever_model')
         print('train', model.evaluate(scaled_input, scaled_output, verbose=2))
@@ -188,7 +703,8 @@ class Network(object):
 
         train_prediction = Network.get_unscaled_values(
                 train_prediction_scaled, 
-                self.scale_output_max, self.scale_output_min, method='B')
+                self.scale_output_max, self.scale_output_min, 
+                method=output_scale_method)
 
         atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) for z, n in 
                 zip(molecule.atoms, range(1,len(molecule.atoms)+1))]
@@ -235,9 +751,12 @@ class Network(object):
         Writer.write_csv([train_input, train_output, train_prediction], 
                 'trainset_inp_out_pred', header)
 
-        Network.get_validation(molecule, input, output, header, atom_names, 
-                all_resorted_list, equiv_atoms, train_input, train_output, 
-                train_prediction)
+        test_prediction = Network.get_validation(
+                molecule, input, output, header, atom_names, 
+                all_resorted_list, equiv_atoms, with_atom_F, train_input, 
+                train_output, train_prediction)
+
+        return train_prediction, test_prediction
 
 
     def pairwise_NN(scaled_input, scaled_output, nodes, _NC2):
@@ -296,20 +815,27 @@ class Network(object):
 
 
     def get_validation(molecule, input, output, header, atom_names, 
-            all_resorted_list, equiv_atoms, train_input, 
+            all_resorted_list, equiv_atoms, with_atom_F, train_input, 
             train_output, train_prediction):
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
+        input_scale_method = 'A'
+        output_scale_method = 'B'
         test_input = np.take(input, molecule.test, axis=0)
         test_output = np.take(output, molecule.test, axis=0)
 
+        if with_atom_F:
+            test_input = test_input.reshape(-1,_NC2)
+            test_output = test_output.reshape(-1,_NC2)
+
         scaled_input_test, scale_input_max, scale_input_min = \
                 Network.get_scaled_values(test_input, np.amax(train_input), 
-                np.amin(train_input), method='C')
+                np.amin(train_input), method=input_scale_method)
         scaled_output_test, scale_output_max, scale_output_min = \
                 Network.get_scaled_values(test_output, 
                 np.amax(np.absolute(train_output)), 
-                np.amin(np.absolute(train_output)), method='B')
+                np.amin(np.absolute(train_output)), 
+                method=output_scale_method)
 
 
         model = load_model('best_ever_model')
@@ -336,7 +862,8 @@ class Network(object):
 
 
         test_prediction = Network.get_unscaled_values(test_prediction_scaled, 
-                scale_output_max, scale_output_min, method='B')
+                scale_output_max, scale_output_min, 
+                method=output_scale_method)
 
 
         if len(input[0]) == _NC2 and equiv_atoms:
@@ -352,9 +879,9 @@ class Network(object):
         Writer.write_csv([test_input, test_output, test_prediction], 
                 'testset_inp_out_pred', header)
 
-        '''
+        get_recomp_charges = False
         ##output charges! ##for Lejun
-        if len(test_prediction[0]) == _NC2:
+        if len(test_prediction[0]) == _NC2 and get_recomp_charges:
             coords_test = np.take(molecule.coords, molecule.test, axis=0)
             charges_test = np.take(molecule.charges, molecule.test, axis=0)
             test_recomp_charges = Converter.get_recomposed_charges(
@@ -364,11 +891,10 @@ class Network(object):
             Writer.write_csv([charges_test, test_recomp_charges], 
                     'testset_ESP_charges', 
                     ','.join(output_header+prediction_header))
-        '''
 
-        get_recomp = True
+        get_recomp_F = False
         #output forces!
-        if len(test_prediction[0]) == _NC2 and get_recomp:
+        if len(test_prediction[0]) == _NC2 and get_recomp_F:
 
             coords_test = np.take(molecule.coords, molecule.test, axis=0)
             #coords = np.take(molecule.coords, molecule.train, axis=0)
@@ -436,6 +962,8 @@ class Network(object):
                     [train_hist, test_hist], ['train', 'test'], 
                     'Error', '% of points below error', 's-curves.png')
 
+        return test_prediction
+
 
     def get_scaled_values_old(values):
         '''normalise values for NN'''
@@ -476,6 +1004,8 @@ class Network(object):
             scaled_values = values / (2 * scale_max) + 0.5
         if method == 'C':
             scaled_values = (values - scale_min) / (scale_max - scale_min)
+        if method == 'D': #if all values are -tive
+            scaled_values = values / -scale_max
 
         return scaled_values, scale_max, scale_min
 
@@ -491,6 +1021,8 @@ class Network(object):
                     (2 * np.absolute(scale_max))
         if method == 'C':
             values = (scaled_values * (scale_max - scale_min)) + scale_min
+        if method == 'D': #if all values are -tive
+            values = scaled_values * -scale_max
 
         return values
 

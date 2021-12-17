@@ -70,11 +70,13 @@ def run_force_pred(input_files='input_files',
             molecule)
     '''
 
-    #'''
+    '''
     XYZParser(atom_file, coord_files, force_files, 
             energy_files, molecule)
-    #'''
+    '''
 
+
+    NPParser(atom_file, coord_files, force_files, [], molecule)
 
     '''
     Writer.write_xyz(molecule.coords, molecule.atoms, 'ensemble-coords.xyz', 'w')
@@ -142,13 +144,201 @@ def run_force_pred(input_files='input_files',
     sys.exit()
     '''
 
+    #A = Molecule.find_bonded_atoms(molecule.atoms, molecule.coords[0])
+    #print(molecule.atoms)
+    #print(A)
 
-    get_decomp = False
+    '''
+    open('decomp_E.txt', 'w')             
+    open('molecular_E.txt', 'w')             
+    f1 = open('decomp_E.txt', 'ab') 
+    f2 = open('molecular_E.txt', 'ab') 
+    n_atoms = len(molecule.atoms)
+    _NC2 = int(n_atoms * (n_atoms-1)/2)
+    for i in range(len(molecule.coords)):
+        decomp_E = Converter.get_energy_decomposition(molecule.atoms, 
+                molecule.coords[i], molecule.energies[i])
+        _E = molecule.energies[i]
+        print(_E)
+        print(decomp_E)
+        np.savetxt(f1, decomp_E.reshape(1,-1))
+        np.savetxt(f2, _E)
+        sum_decomp = np.sum(decomp_E)
+        print(sum_decomp, sum_decomp/_E)
+        recomp = Converter.get_recomposed_energy(molecule.coords[i], decomp_E, 
+                n_atoms, _NC2)
+        print(recomp)
+        print()
+    '''
+
+    get_decomp = True
     if get_decomp:
         print(molecule)
         print('\ncheck and get force decomp')
         unconserved = Molecule.check_force_conservation(molecule) #
         Converter(molecule) #get pairwise forces
+        print(datetime.now() - startTime)
+
+    '''
+    #aspirin
+    scale_NRF = 13036.56150157717
+    scale_NRF_min = 4.296393449372179 
+    scale_F = 114.0951589972158
+    scale_F_min = 1.1633573357150429e-06
+    '''
+
+    #'''
+    #malonaldehyde 
+    scale_NRF = 12364.344210692281
+    scale_NRF_min = 15.377554794644805
+    scale_F = 102.58035961189837
+    scale_F_min = 2.4191760310543486e-06
+    #'''
+
+
+    '''
+    #ethanediol    
+    scale_NRF = 19911.051275945494
+    scale_NRF_min = 11.648288117257646
+    scale_F = 105.72339728320982 
+    scale_F_min = 0
+    '''
+
+    check_model = False
+    if check_model:
+        print('check model error')
+        n_atoms = len(molecule.atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        Converter(molecule) #get pairwise forces
+        scaled_input, in_max, in_min = Network.get_scaled_values(
+                molecule.mat_NRF, 
+                scale_NRF, scale_NRF_min, method='A')
+        scaled_output, _max, _min = Network.get_scaled_values(molecule.mat_F, 
+                scale_F, scale_F_min, method='B')
+        print('\nNRF_min: {} NRF_max: {}\nF_min: {} F_max: {}\n'.format(
+            np.amin(molecule.mat_NRF), np.amax(molecule.mat_NRF),
+            np.amin(np.absolute(molecule.mat_F)), 
+            np.amax(np.absolute(molecule.mat_F))))
+        model = load_model('best_ever_model')
+        train_prediction_scaled = model.predict(scaled_input)
+        train_prediction = Network.get_unscaled_values(
+                train_prediction_scaled, 
+                scale_F, scale_F_min, method='B')
+        train_recomp_forces = Network.get_recomposed_forces(
+                molecule.coords, train_prediction, n_atoms, _NC2)
+        print(molecule.mat_NRF.shape, train_prediction.shape, 
+                train_recomp_forces.shape)
+        train_mae, train_rms = Binner.get_error(molecule.mat_F.flatten(), 
+                    train_prediction.flatten())
+        print('\nTrain MAE: {} \nTrain RMS: {}'.format(train_mae, train_rms))
+        sys.stdout.flush()
+
+    decomp_F = True
+    if decomp_F:
+        n_atoms = len(molecule.atoms)
+        NRF_scale_method = 'A'
+        model = load_model('best_ever_model')
+        dr = 0.01
+        open('scaled-forces.txt', 'w')
+        open('predicted-forces.txt', 'w')
+        open('scaled-qs.txt', 'w')
+        open('predicted-qs.txt', 'w')
+        open('separate-qs.txt', 'w')
+        open('separate-scale-factors.txt', 'w')
+        f2 = open('scaled-forces.txt', 'a')
+        f3 = open('predicted-forces.txt', 'a')
+        f4 = open('scaled-qs.txt', 'a')
+        f5 = open('predicted-qs.txt', 'a')
+        f6 = open('separate-qs.txt', 'a')
+        f7 = open('separate-scale-factors.txt', 'a')
+        n_structures = 1 #len(molecule.coords)
+        for i in range(n_structures):
+            print(i)
+            pred_F, scaled_F, pred_q, scaled_q, scaling_factors = \
+                    Conservation.get_conservation(i,
+                    molecule.coords[i], molecule.forces[i], 
+                    molecule.atoms, scale_NRF, 0, scale_F, 
+                    model, molecule, dr, NRF_scale_method)
+            scaled_F = scaled_F.reshape(n_atoms,-1)
+            pred_F = pred_F.reshape(n_atoms,-1)
+            #print(scaled_F)
+            #print(pred_F)
+            #print()
+            np.savetxt(f2, scaled_F)
+            np.savetxt(f3, pred_F)
+            np.savetxt(f4, scaled_q)
+            np.savetxt(f5, pred_q)
+            sys.stdout.flush()
+
+            displaced_of_displaced = True
+            if displaced_of_displaced:
+                displaced_coords = np.loadtxt(
+                        '1_coords.txt').reshape(-1,n_atoms,3)
+                print(displaced_coords.shape)
+                for j in range(len(displaced_coords)):
+                    print('j', j)
+                    pred_F, scaled_F, pred_q, scaled_q, scaling_factors = \
+                            Conservation.get_conservation(j,
+                            displaced_coords[j], None, 
+                            molecule.atoms, scale_NRF, 0, scale_F, 
+                            model, molecule, dr, NRF_scale_method)
+                    pred_q = pred_q.reshape(1,-1)
+                    scaling_factors = scaling_factors.reshape(1,-1)
+                    np.savetxt(f6, pred_q)
+                    np.savetxt(f7, scaling_factors)
+                    print('check q', pred_q)
+                    print('check SF', scaling_factors)
+                    print()
+        f2.close()
+        f3.close()
+        f4.close()
+        f5.close()
+        f6.close()
+        f7.close()
+        pred_F = np.loadtxt('predicted-forces.txt')
+        scaled_F = np.loadtxt('scaled-forces.txt')
+        pred_q = np.loadtxt('predicted-qs.txt')
+        scaled_q = np.loadtxt('scaled-qs.txt')
+        print(pred_F.shape)
+        pred_mae, pred_rms = Binner.get_error(
+                molecule.forces[:n_structures].flatten(), pred_F.flatten())
+        scaled_mae, scaled_rms = Binner.get_error(
+                molecule.forces[:n_structures].flatten(), scaled_F.flatten())
+        print('F prediction MAE: {} RMS: {}'.format(pred_mae, pred_rms))
+        print('F scaled MAE: {} RMS: {}'.format(scaled_mae, scaled_rms))
+
+        pred_mae, pred_rms = Binner.get_error(
+                molecule.mat_F[:n_structures].flatten(), pred_q.flatten())
+        scaled_mae, scaled_rms = Binner.get_error(
+                molecule.mat_F[:n_structures].flatten(), scaled_q.flatten())
+        print('q prediction MAE: {} RMS: {}'.format(pred_mae, pred_rms))
+        print('q scaled MAE: {} RMS: {}'.format(scaled_mae, scaled_rms))
+
+        each_pred_mae, each_pred_rms = Binner.get_each_error(
+                molecule.mat_F[:n_structures].flatten(), pred_q.flatten())
+
+        each_pred_mae_F, each_pred_rms_F = Binner.get_each_error(
+                molecule.forces[:n_structures].flatten(), pred_F.flatten())
+
+        pairs = []
+        for i in range(len(molecule.atoms)):
+            for j in range(i):
+                pairs.append([i, j])
+
+        interatomic_measures = Binner()
+        interatomic_measures.get_bond_pop(molecule.coords, pairs)
+
+        Plotter.xy_scatter(
+                [interatomic_measures.rs[:n_structures].T.flatten()], 
+                [each_pred_rms], [''], ['k'], 'r', 'rms', 2, 'rms_r-q.png')
+        Plotter.xy_scatter(
+                [interatomic_measures.rs[:n_structures].T.flatten()], 
+                [pred_q.flatten()], [''], ['k'], 'r', 'qAB', 2, 'q_r.png')
+        n_list = list(range(n_atoms))
+        n_list = np.array([n_list * n_structures * 3])
+        Plotter.xy_scatter([n_list], 
+                [each_pred_rms_F], [''], ['k'], 'atom index', 
+                'rms', 2, 'rms_N-F.png')
 
     '''
     print('\nget equivalent atoms')
@@ -345,10 +535,10 @@ def run_force_pred(input_files='input_files',
 
 
 
-    run_mm = True
-    open('vary_qAB.txt', 'w').close()
-    open('ave_delta_F.txt', 'w').close()
+    run_mm = False
     if run_mm:
+        open('vary_qAB.txt', 'w').close()
+        open('ave_delta_F.txt', 'w').close()
         qAB_factor = 1 #0.95
         #print(molecule.forces[0])
         for x in range(1):

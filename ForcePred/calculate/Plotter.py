@@ -153,7 +153,7 @@ class Plotter(object):
         for x, y, label in zip(x_list, y_list, label_list):
             line = ax.plot(x, y, lw=3, label=label)
             lines.append(line)
-        #ax.set_xscale('log')
+        ax.set_xscale('log')
         Plotter.format(ax, x, y, xlabel, ylabel)
         ax.xaxis.set_tick_params(direction='in', which='both')
         ax.yaxis.set_tick_params(direction='in', which='both')

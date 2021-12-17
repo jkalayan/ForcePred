@@ -21,7 +21,7 @@ class Converter(object):
     Eh2kcalmol = 627.5095 #hartree to kcal/mol
     Eh2kJmol = Eh2kcalmol * kcal2kj #hartree to kJ/mol
     au2kJmola = Eh2kJmol / au2Ang #convert from Eh/a_0 to kJ/(mol Ang)
-    au2kcalmola = Eh2kcalmol * au2Ang #convert from Eh/a_0 to kcal/(mol Ang)
+    au2kcalmola = Eh2kcalmol * au2Ang ###convert from Eh/a_0 to kcal/(mol Ang)
     rad2deg = float(180) / float(np.pi) #radians to degrees
     ang2m = 1e-10
     m2ang = 1e10
@@ -55,6 +55,7 @@ class Converter(object):
             self.mat_r = np.zeros((n_structures, _NC2))
             self.mat_NRF = np.zeros((n_structures, _NC2))
             mat_vals = np.zeros((n_structures, n_atoms, 3, _NC2))
+            mat_bias = np.zeros((n_structures, _NC2))
             mat_F = [] 
             for s in range(n_structures):
                 _N = -1
@@ -63,29 +64,54 @@ class Converter(object):
                     for j in range(i):
                         _N += 1
                         zj = self.atoms[j]
+                        cutoff = 3
                         r = Converter.get_r(self.coords[s][i], 
                                 self.coords[s][j])
                         self.mat_r[s,_N] = r
                         self.mat_r[s,_N] = r
-                        if i != j:
-                            self.mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
+                        self.mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
+                        #mat_bias[s,_N] = self.mat_NRF[s,_N]
+                        mat_bias[s,_N] = 1 #Converter.get_bias(zi, zj, r, 
+                                #'1/r')
+                        #self.mat_NRF[s,_N] = mat_bias[s,_N]
+                        #if r > cutoff:
+                            #mat_bias[s,_N] = 0
+                            #self.mat_NRF[s,_N] = 0
                         for x in range(0, 3):
                             val = ((self.coords[s][i][x] - 
                                     self.coords[s][j][x]) /
-                                    self.mat_r[s,_N]) #* self.mat_NRF[s,_N]
+                                    self.mat_r[s,_N]) * mat_bias[s,_N]
+                                        # self.mat_NRF[s,_N]
                             mat_vals[s,i,x,_N] = val
                             mat_vals[s,j,x,_N] = -val
 
                 mat_vals2 = mat_vals[s].reshape(n_atoms*3,_NC2)
                 forces2 = self.forces[s].reshape(n_atoms*3)
                 _F = np.matmul(np.linalg.pinv(mat_vals2), forces2)
-                '''##### if using scale factor, need to remove it.
+                ''' #for atomwise decomposition
+                print('decompF_all', _F)
+                print()
+                #recompF = np.dot(mat_vals2, _F)
+                #print(forces2, recompF)
+                for i in range(n_atoms):
+                    e1 = mat_vals[s][i].reshape(3,_NC2)
+                    f1 = self.forces[s][i].reshape(3)
+                    _f1 = np.matmul(np.linalg.pinv(e1), f1)
+                    recompF1 = np.dot(e1, _f1)
+                    print('e1', e1)
+                    print('atomF and atomRecompF', f1, recompF1)
+                    print('atom decompF', _f1)
+                    print()
+                print()
+                '''
+                #'''##### if using scale factor, need to remove it.
                 _N2 = -1
                 for i in range(n_atoms):
                     for j in range(i):
                         _N2 += 1
-                        _F[_N2] = _F[_N2] * self.mat_NRF[s,_N2]
-                '''#####
+                        _F[_N2] *= mat_bias[s,_N]
+                            # self.mat_NRF[s,_N2]
+                #'''#####
                 mat_F.append(_F)
 
 
@@ -199,6 +225,7 @@ class Converter(object):
         return np.array(all_recomp_charges).reshape(-1,n_atoms)
 
     def get_decomposition(atoms, coords, var):
+        '''forces'''
         n_atoms = len(atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
         mat_r = np.zeros((_NC2))
@@ -223,6 +250,301 @@ class Converter(object):
         decomposed = np.matmul(np.linalg.pinv(mat_vals2), var2)
         return decomposed
 
+    def get_interatomic_energies(molecule, bias_type='NRF'):
+        '''decompose molecular energy into pairwise energies'''
+        n_atoms = len(molecule.atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        n_structures = len(molecule.coords)
+        molecule.mat_NRF = np.zeros((n_structures, _NC2))
+        molecule.mat_E = np.zeros((n_structures, _NC2))
+        molecule.mat_r = np.zeros((n_structures, _NC2))
+        molecule.mat_bias = np.zeros((n_structures, _NC2))
+        for s in range(n_structures):
+            #mat_bias = np.zeros((_NC2))
+            #mat_r = np.zeros((_NC2))
+            _N = -1
+            for i in range(n_atoms):
+                zi = molecule.atoms[i]
+                for j in range(i):
+                    _N += 1
+                    zj = molecule.atoms[j]
+                    r = Converter.get_r(molecule.coords[s,i], 
+                            molecule.coords[s,j])
+                    molecule.mat_r[s,_N] = r
+                    molecule.mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
+                    bias = molecule.mat_NRF[s,_N]
+                    if bias_type != 'NRF':
+                        bias = Converter.get_bias(zi, zj, r, bias_type)
+                    molecule.mat_bias[s,_N] = bias
+
+            mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2))
+            _E = molecule.energies[s].reshape(1)
+            decomp_E = np.matmul(np.linalg.pinv(mat_bias2), _E)
+            #rescale using bias
+            _N2 = -1
+            for i in range(n_atoms):
+                for j in range(i):
+                    _N2 += 1
+                    decomp_E[_N2] *= molecule.mat_bias[s,_N2]
+            molecule.mat_E[s] = decomp_E
+            #for e in molecule.mat_E[s]:
+                #print(e)
+            #print(mat_r)
+            #print()
+        #molecule.mat_E = np.reshape(np.vstack(mat_E), (n_structures,_NC2))
+
+
+    def get_atomwise_decompF(molecule, bias_type='NRF'):
+        '''Get decomposed forces for each pair separately. This is done by
+        averaging pair contributions for each atom both for inputs and eij
+        and then using the averages in x,z,z to get single decompF. Could
+        then train these all separately as with ANI-1.'''
+
+        n_atoms = len(molecule.atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        n_structures = len(molecule.coords)
+        molecule.atom_NRF = np.zeros((n_structures, n_atoms, _NC2))
+        #molecule.mat_bias = np.zeros((n_structures, n_atoms))
+        molecule.atom_F = np.zeros((n_structures, n_atoms, _NC2))
+        for s in range(n_structures):
+            mat_eij = np.zeros((n_atoms, 3, _NC2))
+            _N = -1
+            for i in range(n_atoms):
+                zi = molecule.atoms[i]
+                for j in range(i):
+                    _N += 1
+                    zj = molecule.atoms[j]
+                    r = Converter.get_r(molecule.coords[s][i], 
+                            molecule.coords[s][j])
+                    molecule.atom_NRF[s,i,_N] = \
+                            Converter.get_NRF(zi, zj, r)
+                    molecule.atom_NRF[s,j,_N] = molecule.atom_NRF[s,i,_N] 
+                    for x in range(0, 3):
+                        eij = ((molecule.coords[s][i][x] - 
+                                molecule.coords[s][j][x]) / r)
+                        mat_eij[i,x,_N] = eij
+                        mat_eij[j,x,_N] = -eij
+
+            for i in range(n_atoms):
+                #print(i)
+                mat_eij2 = mat_eij[i].reshape(3,_NC2)
+                forces2 = molecule.forces[s,i].reshape(3)
+                decomp_atom_F = np.matmul(np.linalg.pinv(mat_eij2), forces2)
+                recomp_F = np.dot(mat_eij2, decomp_atom_F)
+                #print('NRF', molecule.atom_NRF[s,i])
+                #print('decompF', decomp_atom_F)
+                #print('F', forces2, recomp_F)
+                molecule.atom_F[s,i] = decomp_atom_F
+            #print(molecule.atom_F[s])
+            #print(mat_eij)
+            #print()
+
+    def get_atomwise_recompF(all_coords, all_prediction, atoms, n_atoms, 
+            _NC2):
+        '''Take per-atom pairwise decomposed F and convert them back into 
+        Cart forces.'''
+        all_recomp_F = np.zeros((len(all_coords), n_atoms, 3))
+        s = -1
+        for coords, prediction in zip(all_coords, all_prediction):
+            mat_eij = np.zeros((n_atoms, 3, _NC2))
+            _N = -1
+            for i in range(n_atoms):
+                zi = atoms[i]
+                for j in range(i):
+                    _N += 1
+                    zj = atoms[j]
+                    r = Converter.get_r(coords[i], coords[j])
+                    for x in range(0, 3):
+                        eij = ((coords[i][x] - coords[j][x]) / r)
+                        mat_eij[i,x,_N] = eij
+                        mat_eij[j,x,_N] = -eij
+
+            for i in range(n_atoms):
+                mat_eij2 = mat_eij[i].reshape(3,_NC2)
+                recomp_F = np.dot(mat_eij2, prediction[i])
+                all_recomp_F[s,i] = recomp_F
+        return all_recomp_F
+
+
+    def get_simultaneous_interatomic_energies_forces(molecule, 
+            bias_type='NRF'):
+        '''Get decomposed energies and forces from the same simultaneous
+        equation'''
+
+        force_bias = False
+
+        n_atoms = len(molecule.atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        n_structures = len(molecule.coords)
+        molecule.mat_NRF = np.zeros((n_structures, _NC2))
+        molecule.mat_bias = np.zeros((n_structures, _NC2))
+        molecule.mat_FE = np.zeros((n_structures, _NC2))
+        for s in range(n_structures):
+            mat_r = np.zeros((_NC2))
+            mat_Fvals = np.zeros((n_atoms, 3, _NC2))
+            _N = -1
+            for i in range(n_atoms):
+                zi = molecule.atoms[i]
+                for j in range(i):
+                    _N += 1
+                    zj = molecule.atoms[j]
+                    r = Converter.get_r(molecule.coords[s][i], 
+                            molecule.coords[s][j])
+                    mat_r[_N] = r
+                    molecule.mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
+                    bias = molecule.mat_NRF[s,_N]
+                    if bias_type != 'NRF':
+                        bias = Converter.get_bias(zi, zj, r, bias_type)
+                    molecule.mat_bias[s,_N] = bias
+                    for x in range(0, 3):
+                        val = ((molecule.coords[s][i][x] - 
+                                molecule.coords[s][j][x]) / mat_r[_N])
+                        if force_bias:
+                            val *= bias
+                        mat_Fvals[i,x,_N] = val
+                        mat_Fvals[j,x,_N] = -val
+
+            mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2)
+            forces2 = molecule.forces[s].reshape(n_atoms*3)
+            #decomp_F = np.matmul(np.linalg.pinv(mat_Fvals2), forces2)
+
+            mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2))
+            _E = molecule.energies[s].reshape(1)
+            #decomp_E = np.matmul(np.linalg.pinv(mat_bias2), _E)
+
+            mat_FE = np.concatenate((mat_Fvals2, mat_bias2), axis=0)
+            _FE = np.concatenate([forces2.flatten(), _E.flatten()])
+            decomp_FE = np.matmul(np.linalg.pinv(mat_FE), _FE)
+
+
+            '''
+            #not sure how to rescale using bias
+            _N2 = -1
+            for i in range(n_atoms):
+                for j in range(i):
+                    _N2 += 1
+                    decomp_FE[_N2] *= mat_bias[_N2]
+                    if force_bias:
+                        decomp_FE[_N2] *= mat_bias[_N2]
+            '''
+            molecule.mat_FE[s] = decomp_FE
+
+
+    def get_recomposed_FE(all_coords, all_prediction, atoms, n_atoms, _NC2, 
+            bias_type):
+        '''Take pairwise decomposed FE and convert them back into 
+        Cart forces and molecular energy.'''
+        all_recomp_F = np.zeros((len(all_coords), n_atoms, 3))
+        all_recomp_E = np.zeros((len(all_coords), 1))
+        s = -1
+        for coords, prediction in zip(all_coords, all_prediction):
+            s += 1
+            #print(coords.shape)
+            #print(prediction.shape)
+            rij = np.zeros((3, n_atoms, n_atoms))
+                #interatomic vectors from col to row
+            eij = np.zeros((3, n_atoms, n_atoms))
+                #normalised interatomic vectors
+            bias_ij = np.zeros((n_atoms, n_atoms))
+            q_list = []
+            for i in range(n_atoms):
+                zi = atoms[i] 
+                for j in range(i):
+                    zj = atoms[j]
+                    r = Converter.get_r(coords[i], coords[j])
+                    bias = Converter.get_bias(zi, zj, r, bias_type)
+                    bias_ij[i,j] = bias
+                    rij[:,i,j] = (coords[i,:] - coords[j,:])
+                    rij[:,j,i] = -rij[:,i,j]
+                    eij[:,i,j] = rij[:,i,j] / np.reshape(
+                            np.linalg.norm(rij[:,i,j], axis=0), (-1,1))
+                    eij[:,j,i] = -eij[:,i,j]
+                    q_list.append([i,j])
+            _T = np.zeros((3*n_atoms+1, _NC2))
+            for i in range(n_atoms):
+                for k in range(_NC2):
+                    if q_list[k][0] == i:
+                        _T[range(i*3, (i+1)*3), k] = \
+                                eij[:,q_list[k][0],q_list[k][1]]
+                    if q_list[k][1] == i:
+                        _T[range(i*3, (i+1)*3), k] = \
+                                eij[:,q_list[k][1],q_list[k][0]]
+            k = -1
+            for i in range(1,n_atoms):
+                for j in range(i):
+                    k += 1
+                    _T[-1,k] = bias_ij[i,j]
+
+            recomp_FE = np.dot(_T, prediction.flatten())
+            recomp_F = recomp_FE[:-1].reshape(-1,3)
+            recomp_E = recomp_FE[-1]
+            #print('recomp_F', recomp_F.shape, recomp_F)
+            #print('recomp_E', recomp_E.shape, recomp_E)
+            all_recomp_F[s] = recomp_F
+            all_recomp_E[s] = recomp_E
+        return all_recomp_F, all_recomp_E
+
+
+    def get_energy_decomposition(atoms, coords, var):
+        '''test to see if one energy term can be decomposed into 
+        pairwise energies'''
+        n_atoms = len(atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        mat_r = np.zeros((_NC2))
+        mat_vals = np.zeros((_NC2))
+        mat_F = [] 
+        _N = -1
+        for i in range(n_atoms):
+            zi = atoms[i]
+            for j in range(i):
+                _N += 1
+                zj = atoms[j]
+                r = Converter.get_r(coords[i], coords[j])
+                #mat_r[_N] = r
+                #mat_r[_N] = r
+                #val = ((coords[i] - coords[j]) / mat_r[_N])
+                mat_vals[_N] = 1/r #val
+
+        mat_vals2 = mat_vals.reshape((1,_NC2))
+        var2 = var.reshape(1)
+        decomposed = np.matmul(np.linalg.pinv(mat_vals2), var2)
+        #rescale using bias
+        _N2 = -1
+        for i in range(n_atoms):
+            for j in range(i):
+                _N2 += 1
+                decomposed[_N2] = decomposed[_N2] * mat_vals[_N2]
+        return decomposed
+
+    def get_recomposed_energy(coords, prediction, n_atoms, _NC2):
+        '''Take pairwise decomposed energies and convert them back into 
+        molecular energy.'''
+        rij = np.zeros((n_atoms, n_atoms))
+        eij = np.zeros((n_atoms, n_atoms))
+            #normalised interatomic vectors
+        q_list = []
+        for i in range(1,n_atoms):
+            for j in range(i):
+                r = Converter.get_r(coords[i], coords[j])
+                eij[i,j] = 1 #r
+                eij[j,i] = -eij[i,j] #-r
+                q_list.append([i,j])
+        _T = np.zeros((1, _NC2))
+        for i in range(int(_T.shape[0])):
+            for k in range(len(q_list)):
+                #if q_list[k][0] == i:
+                _T[i,k] = eij[q_list[k][0],q_list[k][1]]
+                '''
+                if q_list[k][1] == i:
+                    _T[range(i, (i+1)), k] = \
+                            eij[q_list[k][1],q_list[k][0]]
+                '''
+        #print(_T)
+        recomp = np.zeros((1))
+        recomp = np.dot(_T, prediction.flatten())
+        return recomp 
+
+
     def get_bias(zA, zB, r, bias_type):
         bias = 1
         if bias_type == '1/r':
@@ -231,6 +553,12 @@ class Converter(object):
             bias = 1 / r ** 2
         if bias_type == 'r':
             bias = r
+        if bias_type == 'r/qq':
+            bias = r / zA * zB
+        if bias_type == 'NRF':
+            bias = Converter.get_NRF(zA, zB, r)
+        if bias_type == '1/qqr2':
+            bias = 1 / zA * zB * r ** 2
         return bias
 
     def get_NRF(zA, zB, r):

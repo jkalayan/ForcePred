@@ -56,9 +56,9 @@ def run_force_pred(input_files='input_files',
     NPParser(atom_file, [], [force_files[2]], [energy_files[0]], 
             mlff_molecule)
     mlff_molecule.coords = mlff2_molecule.coords
-    #mlff_molecule.forces = mlff_molecule.forces
+    mlff_molecule.forces = mlff_molecule.forces
     mlff_molecule.energies = mlff_molecule.energies
-    print(mlff_molecule.coords.shape, #mlff_molecule.forces.shape, 
+    print(mlff_molecule.coords.shape, mlff_molecule.forces.shape, 
             mlff_molecule.energies.shape)
 
     gaff_molecule = Molecule()
@@ -71,55 +71,25 @@ def run_force_pred(input_files='input_files',
     print(datetime.now() - startTime)
     sys.stdout.flush()
 
-
     time = np.array(list(range(0, 20000))) * 0.0005 #10ps
 
-    '''
-    time = np.array(list(range(0, 2609))) * 0.005 #13ns
-
-    print(len(time), len(mlff_molecule.energies.flatten()))
-
-    time2 = []
-    dE = []
-    for t, e in zip(time, mlff_molecule.energies.flatten()):
-        if e > -3 and e < 100:
-            time2.append(t)
-            dE.append(e)
-        else:
-            continue
 
 
 
-    info = [[time2, dE, 'MLFF', r'$\Delta E$ / kcal/mol', 10, 'mlff-dE-2'],
-            ]
+    print('CCCCCCCCCOOOOHHHHHHHH')
+    A = Molecule.find_bonded_atoms(mlff_molecule.atoms, 
+            mlff_molecule.coords[0])
+    print(A)
 
-    for i in info:
-        Plotter.xy_scatter([i[0]], [i[1]], [i[2]], ['k'], 'time / ns', 
-                i[3], i[4], 'scatter-{}.png'.format(i[5]))
-    '''
+    print(datetime.now() - startTime)
+    sys.stdout.flush()
+
+    #CCCCCCCCCOOOOHHHHHHHH
 
 
-    #A = Molecule.find_bonded_atoms(mlff_molecule.atoms, 
-            #mlff_molecule.coords[0])
-    #print(A)
-
-    #CCCOOHHHH
-    bonded_list = [[0,1], [0,4], [0,5], 
-            [1,2], [1,6], [1,7], 
-            [2,3], [2,8]]
-    angle_list = [[1,0,4], [1,0,5], [4,0,5], 
-            [0,1,2], [0,1,7], [0,1,6], [2,1,6], [2,1,7],
-            [1,2,3], [1,2,8], [3,2,8]]
-    dihedral_list = [[0,1,2,3], [0,1,2,8],
-            [2,1,0,4], [2,1,0,5], 
-            [3,2,1,6],[3,2,1,7],
-            [4,0,1,6], [4,0,1,7],
-            [5,0,1,6], [5,0,1,7],
-            [6,1,2,8], [7,1,2,8]]
-
-    dihedrals = [[0,1,2,3], [2,1,0,4]]
-    angles = [[0,1,2]]
-    bonds = [[0,1]]
+    dihedrals = [[4,8,12,6], [6,5,7,9], [12,6,5,7]] #CCOC, CCCO, OCCC
+    angles = [[5,6,12], [6,5,7]] #CCO, CCC
+    bonds = [[12,6]] #CC
 
     mlff_measures = Binner()
     mlff_measures.get_dih_pop(mlff_molecule.coords, dihedrals)
@@ -131,16 +101,17 @@ def run_force_pred(input_files='input_files',
     gaff_measures.get_angle_pop(gaff_molecule.coords, angles)
     gaff_measures.get_bond_pop(gaff_molecule.coords, bonds)
 
-
     Plotter.xy_scatter([mlff_measures.phis.T[0]], [mlff_measures.phis.T[1]], 
-            ['mlff'], ['k'], 'CCCO3 dih', 'CCCO4 dih', 2, 'dihs-mlff.png')
+            ['mlff'], ['k'], 'CCOC dih', 'CCCO dih', 2, 'dihs-mlff.png')
     Plotter.xy_scatter([gaff_measures.phis.T[0]], [gaff_measures.phis.T[1]], 
-            ['gaff'], ['k'], 'CCCO3 dih', 'CCCO4 dih', 2, 'dihs-gaff.png')
+            ['gaff'], ['k'], 'CCOC dih', 'CCCO dih', 2, 'dihs-gaff.png')
 
+    '''
     Plotter.hist_2d(mlff_measures.phis.T[0], mlff_measures.phis.T[1], 
-            'CCCO3', 'CCCO4', 'hist2d-mlff-dihs.png')
+            'CCOC', 'CCCO', 'hist2d-mlff-dihs.png')
     Plotter.hist_2d(gaff_measures.phis.T[0], gaff_measures.phis.T[1], 
-            'CCCO3', 'CCCO4', 'hist2d-gaff-dihs.png')
+            'CCOC', 'CCCO', 'hist2d-gaff-dihs.png')
+    '''
 
     print(datetime.now() - startTime)
     sys.stdout.flush()
@@ -160,9 +131,12 @@ def run_force_pred(input_files='input_files',
     train_interatomic_measures.get_bond_pop(train_molecule.coords, pairs)
 
     info = [[mlff_molecule.energies, gaff_molecule.energies, 100, 'dE'],
-            [mlff_measures.phis.T[0], gaff_measures.phis.T[0], 180, 'CCCO3'],
-            [mlff_measures.phis.T[1], gaff_measures.phis.T[1], 180, 'CCCO4'],
+            [mlff_measures.phis.T[0], gaff_measures.phis.T[0], 180, 'CCOC'],
+            [mlff_measures.phis.T[1], gaff_measures.phis.T[1], 180, 'CCCO'],
+            [mlff_measures.phis.T[2], gaff_measures.phis.T[2], 180, 'OCCC'],
             [mlff_measures.thetas.T[0], gaff_measures.thetas.T[0], 180, 
+                'CCO'],
+            [mlff_measures.thetas.T[1], gaff_measures.thetas.T[1], 180, 
                 'CCC'],
             [mlff_measures.rs.T[0], gaff_measures.rs.T[0], 100, 'CC'],
             [mlff_interatomic_measures.rs.T.flatten(), 
@@ -181,54 +155,20 @@ def run_force_pred(input_files='input_files',
     sys.stdout.flush()
 
 
-    info = [[time, mlff_molecule.energies, 'MLFF', r'$\Delta E$ / kcal/mol', 
-                10, 'mlff-dE'],
-            [time, gaff_molecule.energies, 'GAFF', r'$\Delta E$ / kcal/mol', 
-                10, 'gaff-dE'],
+    info = [[time, mlff_molecule.energies, 'MLFF', r'$\Delta E$ / kcal/mol', 10, 'mlff-dE'],
+            [time, gaff_molecule.energies, 'GAFF', r'$\Delta E$ / kcal/mol', 10, 'gaff-dE'],
             [time, mlff_measures.rs.T[0], 'MLFF', r'CC $r / \AA$', 10, 'CC'],
-            [time, mlff_measures.phis.T[0], 'MLFF', r'CCCO3 $\Phi$', 10, 
-                'CCCO3'],
+            [time, mlff_measures.phis.T[1], 'MLFF', r'CCCO $\Phi$', 10, 'CCCO'],
             ]
 
     for i in info:
-        Plotter.xy_scatter([i[0]], [i[1]], [i[2]], ['k'], 'time / ns', 
+        Plotter.xy_scatter([i[0]], [i[1]], [i[2]], ['k'], 'time / ps', 
                 i[3], i[4], 'scatter-{}.png'.format(i[5]))
 
 
     print(datetime.now() - startTime)
     sys.stdout.flush()
 
-
-    train_measures = Binner()
-    train_measures.get_dih_pop(train_molecule.coords, dihedrals)
-    train_measures.get_bond_pop(train_molecule.coords, pairs)
-
-    test_measures = Binner()
-    test_measures.get_dih_pop(test_molecule.coords, dihedrals)
-    test_measures.get_bond_pop(test_molecule.coords, pairs)
-
-    info = [
-            [train_molecule.forces.flatten(), test_molecule.forces.flatten(),
-                100, 'F'],
-            [train_measures.phis.T[0], test_measures.phis.T[0], 180, 'CCCO3'],
-            [train_measures.phis.T[1], train_measures.phis.T[1], 180, 
-                'CCCO4'],
-            [train_measures.rs.T.flatten(), test_measures.rs.T.flatten(), 200, 
-                'interatomic-rs'],
-            [train_measures.rs.T.flatten(), 
-                mlff_interatomic_measures.rs.T.flatten(),  200, 
-                'interatomic-rs-train-mlff']
-            ]
-
-    for i in info:
-        bin_edges, hist = Binner.get_hist(i[0], i[2])
-        bin_edges2, hist2 = Binner.get_hist(i[1], i[2])
-        Plotter.xy_scatter([bin_edges, bin_edges2], [hist, hist2], 
-                ['train', 'test'], ['k', 'b'], i[3], 'probability', 40,
-                'hist-train-test-{}.png'.format(i[3]))
-
-    print(datetime.now() - startTime)
-    sys.stdout.flush()
 
     info = [[mlff_interatomic_measures.rs.T.flatten(), 
                 train_interatomic_measures.rs.T.flatten(), 1000, 
@@ -241,12 +181,6 @@ def run_force_pred(input_files='input_files',
         Plotter.xy_scatter([bin_edges, bin_edges2], [hist, hist2], 
                 ['MLFF', 'MD17'], ['k', 'r'], i[3], 'probability', 10,
                 'hist-mlff-md17-train-{}.png'.format(i[3]))
-
-
-
-
-
-
 
 
     print(datetime.now() - startTime)
