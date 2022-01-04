@@ -11,6 +11,7 @@ from keras.models import Model, load_model
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from keras import backend as K                                              
 import tensorflow as tf
+#import tensorflow_probability as tfp
 from functools import partial
 from ..calculate.MM import MM
 from ..calculate.Converter import Converter
@@ -31,6 +32,152 @@ K.set_session(sess)
 '''
 
 
+class CoordsToNRF(Layer):
+    def __init__(self, atoms2, max_NRF, name):
+        super(CoordsToNRF, self).__init__()
+        self.atoms2 = atoms2
+        self.max_NRF = max_NRF
+        self.name = name
+        self.au2kcalmola = 627.5095 * 0.529177
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        n_atoms = input_shape[1]
+        return (batch_size, n_atoms, n_atoms)
+
+    def call(self, coords):
+        '''From coords shaped (batch,n_atoms,3), get NRFs as the lower and 
+        upper triangles of a sq matrix (batch,n_atoms,n_atoms).'''
+        #distance between all pairs
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        r = tf.reduce_sum(diff**2, axis=-1)**0.5
+        #get NRF and scale
+        _NRF = ((self.atoms2 * self.au2kcalmola) / (r ** 2)) / self.max_NRF
+        #remove infs
+        triangle_NRF = tf.where(tf.is_inf(_NRF), tf.zeros_like(_NRF), _NRF) 
+        return triangle_NRF
+
+
+class FlatTriangle(Layer):
+    def __init__(self, _NC2, name):
+        super(FlatTriangle, self).__init__()
+        self._NC2 = _NC2
+        self.name = name
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, self._NC2)
+
+    def call(self, tri):
+        '''Take the lower triangle of the sq matrix, remove zeros and reshape
+        https://stackoverflow.com/questions/42032517/
+                how-to-omit-zeros-in-a-4-d-tensor-in-tensorflow
+        '''
+        tri = tf.linalg.band_part(tri, -1, 0)
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        reshaped_nonzero_values = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        return reshaped_nonzero_values
+
+
+class Triangle(Layer):
+    def __init__(self, n_atoms, name):
+        super(Triangle, self).__init__()
+        self.n_atoms = n_atoms
+        self.name = name
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, self.n_atoms, self.n_atoms)
+
+    def call(self, decompFE):
+        '''Convert flat NC2 to lower and upper triangle sq matrix, this
+        is used in get_FE_eij_matrix to get recomposedFE
+        https://stackoverflow.com/questions/40406733/
+                tensorflow-equivalent-for-this-matlab-code
+        '''
+        decompFE = tf.convert_to_tensor(decompFE, dtype=tf.float32)
+        decompFE.get_shape().with_rank_at_least(1)
+
+        #put batch dimensions last
+        decompFE = tf.transpose(decompFE, tf.concat([[tf.rank(decompFE)-1],
+                tf.range(tf.rank(decompFE)-1)], axis=0))
+        input_shape = tf.shape(decompFE)[0]
+        #compute size of matrix that would have this upper triangle
+        matrix_size = (1 + tf.cast(tf.sqrt(tf.cast(input_shape*8+1, 
+                tf.float32)), tf.int32)) // 2
+        matrix_size = tf.identity(matrix_size)
+        #compute indices for whole matrix and upper diagonal
+        index_matrix = tf.reshape(tf.range(matrix_size**2), 
+                [matrix_size, matrix_size])
+        diagonal_indices = (matrix_size * tf.range(matrix_size)
+                + tf.range(matrix_size))
+        upper_triangular_indices, _ = tf.unique(tf.reshape(
+                tf.matrix_band_part(index_matrix, -1, 0)
+                - tf.diag(diagonal_indices), [-1]))
+        batch_dimensions = tf.shape(decompFE)[1:]
+        return_shape_transposed = tf.concat([[matrix_size, matrix_size],
+                batch_dimensions], axis=0)
+        #fill everything else with zeros; later entries get priority
+        #in dynamic_stitch
+        result_transposed = tf.reshape(tf.dynamic_stitch([index_matrix,
+                upper_triangular_indices[1:]],
+                [tf.zeros(return_shape_transposed, dtype=decompFE.dtype),
+                decompFE]), return_shape_transposed)
+        #Transpose the batch dimensions to be first again
+        Q = tf.transpose(result_transposed, tf.concat(
+                [tf.range(2, tf.rank(decompFE)+1), [0,1]], axis=0))
+        Q2 = tf.transpose(result_transposed, tf.concat(
+                [tf.range(2, tf.rank(decompFE)+1), [1,0]], axis=0))
+        Q3 = Q + Q2
+        return Q3
+
+
+class EijMatrix(Layer):
+    def __init__(self, n_atoms, max_FE, name):
+        super(EijMatrix, self).__init__()
+        self.max_FE = max_FE
+        self.n_atoms = n_atoms
+        self.name = name
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0][0]
+        return (batch_size, self.n_atoms*3+1)
+
+    def call(self, decompFE_coords):
+        '''decompFE is a sq upper and lower triangle matrix, from coords we 
+        get the eij matrices for Fs and Es.'''
+        decompFE = decompFE_coords[0]
+        coords = decompFE_coords[1] 
+        #rescale decompFE
+        decompFE = ((tf.convert_to_tensor(decompFE, dtype=tf.float32) - 0.5)
+                * (2 * self.max_FE))
+        #get force (r_xi - r_xj / |r_ij|) eij matrix
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        r = tf.reduce_sum(diff**2, axis=-1)**0.5
+        r2 = tf.expand_dims(r, 3)
+        eij = diff / r2
+        eij_F = tf.where(tf.is_nan(eij), tf.zeros_like(eij), 
+                eij) #remove nans
+        #get energy 1/r_ij eij matrix
+        recip_r = 1 / r
+        recip_r2 = tf.where(tf.is_inf(recip_r), tf.zeros_like(recip_r), 
+                recip_r) #remove infs
+        eij_E = tf.expand_dims(recip_r2, 3)
+        #dot product of 
+        F = tf.einsum('bijk, bij -> bik', eij_F, decompFE)
+        E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
+        E = E2/2
+        F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
+        FE = tf.concat([F_reshaped, E], axis=1)
+        return FE
+
+
 class Network(object):
     '''
     '''
@@ -48,7 +195,6 @@ class Network(object):
 
     def get_network(molecule, scale_NRF, scale_NRF_min, 
             scale_F, scale_F_min):
-
         network = Network(molecule)
         #network.model_name = '../best_ever_model'
         #network.model = load_model(network.model_name)
@@ -56,7 +202,6 @@ class Network(object):
         network.scale_NRF_min = scale_NRF_min
         network.scale_F = scale_F
         network.scale_F_min = scale_F_min
-
         return network
 
 
@@ -66,244 +211,303 @@ class Network(object):
             x = sess.run(a)
             print(x)
 
+
     def return_tensor(a):
         with tf.Session() as sess: #to get tensor to numpy
             sess.run(tf.global_variables_initializer())
-            a = sess.run(a)
-        return a
+            x = sess.run(a)
+        return x
 
 
-    @tf.function
-    def get_FE_eij_matrix(decompFE, coords, atoms, n_atoms, _NC2):
-        '''2. From network decomposed FEs, need an eij matrix
-        to recompose decompFE to 3N CartF + molecular E within the network
+    def get_FE_eij_matrix(decompFE, coords, max_FE):
+        '''decompFE is a sq upper and lower triangle matrix, from coords we 
+        get the eij matrices for Fs and Es.'''
+        #rescale decompFE
+        decompFE = ((tf.convert_to_tensor(decompFE, dtype=tf.float32) - 0.5)
+                * (2 * max_FE))
+        #get force (r_xi - r_xj / |r_ij|) eij matrix
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        r = tf.reduce_sum(diff**2, axis=-1)**0.5
+        r2 = tf.expand_dims(r, 3)
+        eij = diff / r2
+        eij_F = tf.where(tf.is_nan(eij), tf.zeros_like(eij), 
+                eij) #remove nans
+        #get energy 1/r_ij eij matrix
+        recip_r = 1 / r
+        recip_r2 = tf.where(tf.is_inf(recip_r), tf.zeros_like(recip_r), 
+                recip_r) #remove infs
+        eij_E = tf.expand_dims(recip_r2, 3)
+        #dot product of 
+        F = tf.einsum('bijk, bij -> bik', eij_F, decompFE)
+        E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
+        E = E2/2
+        F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
+        FE = tf.concat([F_reshaped, E], axis=1)
+        return FE
+
+
+    def get_triangle(decompFE):
+        '''Convert flat NC2 to lower and upper triangle sq matrix, this
+        is used in get_FE_eij_matrix to get recomposedFE
+        https://stackoverflow.com/questions/40406733/
+                tensorflow-equivalent-for-this-matlab-code
         '''
-        atoms = tf.convert_to_tensor(atoms, dtype=tf.float32)
-        coords = tf.reshape(coords, [-1,n_atoms,3])
-        n_structures = 1 #coords.shape[0]
-        i = tf.constant(0)
-        j = tf.constant(0)
-        _N = tf.constant(-1)
-        s = tf.constant(0)
-        eij = tf.zeros((n_structures,n_atoms*3+1,_NC2))
+        decompFE = tf.convert_to_tensor(decompFE, dtype=tf.float32)
+        decompFE.get_shape().with_rank_at_least(1)
 
-        def cond3(i, j, _N, x, s, eij, r):
-            return tf.less(x, 3)
-
-        def body3(i, j, _N, x, s, eij, r):
-            val = tf.divide(tf.subtract(coords[s][i][x], coords[s][j][x]), r)
-            minus_val = tf.negative(val)
-
-            index = [[s,i*3+x,_N]]
-            value = [val]
-            shape = [n_structures,n_atoms*3+1,_NC2]
-            delta = tf.SparseTensor(index, value, shape)
-            result = eij + tf.sparse_tensor_to_dense(delta)
-            eij = result
-
-            index = [[s,j*3+x,_N]]
-            value = [minus_val]
-            shape = [n_structures,n_atoms*3+1,_NC2]
-            delta = tf.SparseTensor(index, value, shape)
-            result = eij + tf.sparse_tensor_to_dense(delta)
-            eij = result
-
-            x = tf.add(x, 1)
-            return i, j, _N, x, s, eij, r
-
-        def cond2(i, j, _N, s, eij):
-            return tf.less(j, i)
-
-        def body2(i, j, _N, s, eij):
-            _N = tf.add(_N, 1)
-            x = tf.constant(0)
-            r = tf.linalg.norm(tf.math.subtract(coords[s][i], coords[s][j]))
-            #for forces
-            i, j, _N, x, s, eij, r = tf.while_loop(cond3, body3, 
-                    [i, j, _N, x, s, eij, r])
-            #for energies
-            recip_r = tf.reciprocal(r)
-            index = [[s,n_atoms*3,_N]]
-            value = [recip_r]
-            shape = [n_structures,n_atoms*3+1,_NC2]
-            delta = tf.SparseTensor(index, value, shape)
-            result = eij + tf.sparse_tensor_to_dense(delta)
-            eij = result
-
-            j = tf.add(j, 1)
-            return i, j, _N, s, eij
-
-        def cond1(i, j, _N, s, eij):
-            return tf.less(i, n_atoms)
-
-        def body1(i, j, _N, s, eij):
-            i, j, _N, s, eij = tf.while_loop(cond2, body2, 
-                    [i, j, _N, s, eij])
-            i = tf.add(i, 1)
-            j = tf.constant(0)
-            return [i, j, _N, s, eij]
-
-        def cond(i, j, _N, s, eij):
-            return tf.less(s, n_structures)
-
-        def body(i, j, _N, s, eij):
-            i, j, _N, s, eij = tf.while_loop(cond1, body1, 
-                    [i, j, _N, s, eij])
-            s = tf.add(s, 1)
-            i = tf.constant(0)
-            _N = tf.constant(-1)
-            return [i, j, _N, s, eij]
-
-        res = tf.while_loop(cond, body, [i, j, _N, s, eij])
-        eij = tf.reshape(res[4], [n_structures,n_atoms*3+1,_NC2])
-        decompFE = tf.reshape(decompFE, [n_structures,_NC2])
-        recompFE = tf.einsum("ijk, ik -> ij", eij, decompFE)
-        #return recompFE.eval(session=tf. compat. v1. Session())
-        return recompFE
+        #put batch dimensions last
+        decompFE = tf.transpose(decompFE, tf.concat([[tf.rank(decompFE)-1],
+                tf.range(tf.rank(decompFE)-1)], axis=0))
+        input_shape = tf.shape(decompFE)[0]
+        #compute size of matrix that would have this upper triangle
+        matrix_size = (1 + tf.cast(tf.sqrt(tf.cast(input_shape*8+1, 
+                tf.float32)), tf.int32)) // 2
+        matrix_size = tf.identity(matrix_size)
+        #compute indices for whole matrix and upper diagonal
+        index_matrix = tf.reshape(tf.range(matrix_size**2), 
+                [matrix_size, matrix_size])
+        diagonal_indices = (matrix_size * tf.range(matrix_size)
+                + tf.range(matrix_size))
+        upper_triangular_indices, _ = tf.unique(tf.reshape(
+                tf.matrix_band_part(index_matrix, -1, 0)
+                - tf.diag(diagonal_indices), [-1]))
+        batch_dimensions = tf.shape(decompFE)[1:]
+        return_shape_transposed = tf.concat([[matrix_size, matrix_size],
+                batch_dimensions], axis=0)
+        #fill everything else with zeros; later entries get priority
+        #in dynamic_stitch
+        result_transposed = tf.reshape(tf.dynamic_stitch([index_matrix,
+                upper_triangular_indices[1:]],
+                [tf.zeros(return_shape_transposed, dtype=decompFE.dtype),
+                decompFE]), return_shape_transposed)
+        #Transpose the batch dimensions to be first again
+        Q = tf.transpose(result_transposed, tf.concat(
+                [tf.range(2, tf.rank(decompFE)+1), [0,1]], axis=0))
+        Q2 = tf.transpose(result_transposed, tf.concat(
+                [tf.range(2, tf.rank(decompFE)+1), [1,0]], axis=0))
+        Q3 = Q + Q2
+        return Q3
 
 
-
-    @tf.function
-    def get_NRF_from_coords(coords, atoms, n_atoms, _NC2):
-        '''1. Use tensors to get NRF from coords, can't use for loops in tf,
-        so have to use nested while loops to iterate over i and j atoms.
+    def flatten_triangle(tri):
+        '''Take the lower triangle of the sq matrix, remove zeros and reshape
+        https://stackoverflow.com/questions/42032517/
+                how-to-omit-zeros-in-a-4-d-tensor-in-tensorflow
         '''
-        atoms = tf.convert_to_tensor(atoms, dtype=tf.float32)
-        coords = tf.reshape(coords, [-1,n_atoms,3])
-        n_structures = 1 #coords.shape[0]
-        i = tf.constant(0)
-        j = tf.constant(0)
-        _N = tf.constant(-1)
-        s = tf.constant(0)
-        _NRF = tf.zeros((n_structures,_NC2))
+        tri = tf.linalg.band_part(tri, -1, 0)
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        reshaped_nonzero_values = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        return reshaped_nonzero_values
 
-        def cond3(i, j, _N, s, _NRF):
-            return tf.less(j, i)
 
-        def body3(i, j, _N, s, _NRF):
-            _N = tf.add(_N, 1)
+    def get_NRF_from_coords(coords, atoms2, max_NRF):
+        '''From coords shaped (batch,n_atoms,3), get NRFs as the lower and 
+        upper triangles of a sq matrix (batch,n_atoms,n_atoms).'''
+        #distance between all pairs
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        r = tf.reduce_sum(diff**2, axis=-1)**0.5
+        '''
+        #multiply all atom zs by with each other
+        atoms2 = tf.tensordot(tf.expand_dims(atoms, 0), 
+                tf.expand_dims(atoms, 0), axes=[[0],[0]])
+        '''
+        #get NRF and scale
+        _NRF = ((atoms2 * Converter.au2kcalmola) / (r ** 2)) / max_NRF
+        #lower_triangle = tf.linalg.band_part(_NRF, -1, 0)
+        #remove infs
+        triangle_NRF = tf.where(tf.is_inf(_NRF), tf.zeros_like(_NRF), _NRF) 
 
-            r = tf.linalg.norm(tf.math.subtract(coords[s][i], coords[s][j]))
-            zizj = tf.multiply(atoms[i], atoms[j])
-            zizj = tf.multiply(zizj, Converter.au2kcalmola)
-            ij_NRF = tf.divide(zizj, tf.square(r))
-
-            index = [[s,_N]]
-            value = [ij_NRF]
-            shape = [n_structures,_NC2]
-            delta = tf.SparseTensor(index, value, shape)
-            result = _NRF + tf.sparse_tensor_to_dense(delta)
-            _NRF = result
-
-            j = tf.add(j, 1)
-            return i, j, _N, s, _NRF
-
-        def cond2(i, j, _N, s, _NRF):
-            return tf.less(i, n_atoms)
-
-        def body2(i, j, _N, s, _NRF):
-            i, j, _N, s, _NRF = tf.while_loop(cond3, body3, 
-                    [i, j, _N, s, _NRF])
-            i = tf.add(i, 1)
-            j = tf.constant(0)
-            return i, j, _N, s, _NRF
-
-        def cond1(i, j, _N, s, _NRF):
-            return tf.less(s, n_structures)
-
-        def body1(i, j, _N, s, _NRF):
-            i, j, _N, s, _NRF = tf.while_loop(cond2, body2, 
-                    [i, j, _N, s, _NRF])
-            s = tf.add(s, 1)
-            i = tf.constant(0)
-            _N = tf.constant(-1)
-            return [i, j, _N, s, _NRF]
-
-        res = tf.while_loop(cond1, body1, [i, j, _N, s, _NRF])
-        res = tf.reshape(res[4], [n_structures,_NC2])
-        return res
+        return triangle_NRF
 
 
     def get_coord_FE_model(self, molecule):
         '''Input coordinates and z_types into model to get NRFS which then 
         are used to predict decompFE, which are then recomposed to give
-        Csrt Fs and molecular E, both of which could be used in the loss
+        Cart Fs and molecular E, both of which could be used in the loss
         function, could weight the E or Fs as required.
         '''
+
         n_atoms = len(molecule.atoms)
-        #n_structures = len(molecule.coords)
-        #print('n_structures', n_structures)
         _NC2 = int(n_atoms*(n_atoms-1)/2)
         atoms = np.array([float(i) for i in molecule.atoms], dtype='float32')
-        #atoms = tf.constant(np.array([float(i) for i in molecule.atoms]),
-                #dtype=tf.float32)
-        coords = tf.constant(np.copy(molecule.coords[0]), dtype=tf.float32)
-        _NRF = Network.get_NRF_from_coords(tf.reshape(coords, 
-                [-1,3*n_atoms]), atoms, n_atoms, _NC2)
-        print('tf NRF:')
-        Network.print_tensor(_NRF[0])
-        print(_NRF.shape)
-        print('NRF:', molecule.mat_NRF[0])
+        atoms_ = tf.convert_to_tensor(atoms, dtype=tf.float32)
+        #multiply each z with each other to get a sq matrix
+        atoms2 = tf.tensordot(tf.expand_dims(atoms_, 0), 
+                tf.expand_dims(atoms_, 0), axes=[[0],[0]])
 
-        decompFE = tf.constant(molecule.mat_FE[0], dtype=tf.float32)
-        recompFE = Network.get_FE_eij_matrix(tf.reshape(decompFE, 
-                [-1,_NC2]), tf.reshape(coords, 
-                [-1,3*n_atoms]), atoms, n_atoms, _NC2)
-        print('tf recompFE:')
-        Network.print_tensor(recompFE[0])
-        print(recompFE.shape)
-        print()
-        sys.stdout.flush()
+        split = 2
+        train = round(len(molecule.coords) / split, 3)
+        print('\nget train and test sets, '\
+                'training set is {} points'.format(train))
+        Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
+                split) #get train and test sets
 
-        sys.exit()
+        input_coords = molecule.coords#.reshape(-1,n_atoms*3)
+        input_NRF = molecule.mat_NRF.reshape(-1,_NC2)
+        input_eij = molecule.mat_eij
+        output_matFE = molecule.mat_FE.reshape(-1,_NC2)
+        output_FE = np.concatenate((molecule.forces.reshape(-1,n_atoms*3), 
+                molecule.energies.reshape(-1,1)), axis=1)
+        output_E = molecule.energies.reshape(-1,1)
 
+        train_input_coords = np.take(input_coords, molecule.train, axis=0)
+        test_input_coords = np.take(input_coords, molecule.test, axis=0)
+        train_input_NRF = np.take(input_NRF, molecule.train, axis=0)
+        train_input_eij = np.take(input_eij, molecule.train, axis=0)
+        train_output_matFE = np.take(output_matFE, molecule.train, axis=0)
+        train_output_FE = np.take(output_FE, molecule.train, axis=0)
+        train_output_E = np.take(output_E, molecule.train, axis=0)
+        test_output_E = np.take(output_E, molecule.test, axis=0)
 
-        end=1
-        input = molecule.coords[0:end].reshape(-1,n_atoms*3)
-        output = np.concatenate((molecule.forces[0:end].reshape(-1,n_atoms*3), 
-                molecule.energies[0:end].reshape(-1,1)), axis=1)
-        #n_structures = len(input)
-        print(input.shape, output.shape)
+        max_NRF1 = np.max(train_input_NRF)
+        max_FE1 = np.max(np.abs(train_output_FE))
+        train_output_matFE_scaled = train_output_matFE / (2 * max_FE1) + 0.5
+        print(train_input_coords.shape, train_output_FE.shape)
+        print('max_NRF: {}, max_FE: {}'.format(max_NRF1, max_FE1))
+        max_NRF = tf.constant(max_NRF1, dtype=tf.float32)
+        max_FE = tf.constant(max_FE1, dtype=tf.float32)
 
-        mc = ModelCheckpoint(
-                'model.h5', 
-                monitor='loss', mode='min', 
+        def custom_loss1(weights):
+            def custom_loss(y_true, y_pred):
+                return K.mean(K.abs(y_true - y_pred) * weights) #mae
+            return custom_loss
+        weights = np.zeros((n_atoms*3+1))
+        weights[-1] = 0 #1 #* n_atoms
+        cl = custom_loss1(weights)
+
+        file_name='best_model'
+        mc = ModelCheckpoint(file_name, monitor='loss', mode='min', 
                 save_best_only=True)
-        es = EarlyStopping(monitor='loss', patience=500)
+        es = EarlyStopping(monitor='loss', patience=1000)
 
-        coords_layer = Input(shape=(n_atoms*3,), name='coords_layer')
-        NRF_layer = Lambda(Network.get_NRF_from_coords, 
-                input_shape=(n_atoms*3,), output_shape=(_NC2,), 
-                name='NRF_layer', arguments={'atoms':atoms, 
-                'n_atoms':n_atoms, '_NC2':_NC2})(coords_layer)
-        net_layer = Dense(units=1000, activation='relu', 
-                name='net_layer')(NRF_layer)
-        decomp_layer = Dense(units=_NC2, activation='linear', 
-                name='decomp_layer')(net_layer)
-        recompFE_layer = Lambda(Network.get_FE_eij_matrix,
-                input_shape=(_NC2,), output_shape=(n_atoms*3+1,),
-                name='recompFE_layer', arguments={'coords':coords_layer, 
-                'atoms':atoms, 'n_atoms':n_atoms, '_NC2':_NC2})(decomp_layer)
-        model = Model(coords_layer, recompFE_layer)
-        model.compile(loss='mse', optimizer='adam', 
-                metrics=['mae', 'acc']) #mean abs error, accuracy
+        with_lambda = False
+        if with_lambda:
+            print('with_lambda')
+            #### WITH LAMBDA LAYERS
+            coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
+            NRF_layer = Lambda(Network.get_NRF_from_coords, 
+                    input_shape=(n_atoms,3), output_shape=(n_atoms,n_atoms), 
+                    name='NRF_layer', arguments={'atoms2':atoms2, 
+                    'max_NRF':max_NRF})(coords_layer)
+            flatten_NRF = Lambda(Network.flatten_triangle, 
+                    input_shape=(n_atoms,n_atoms), output_shape=(_NC2,), 
+                    name='flatten_NRF')(NRF_layer)
+            net_layer = Dense(units=1000, activation='sigmoid', 
+                    name='net_layer')(flatten_NRF)
+            net_layer2 = Dense(units=_NC2, activation='sigmoid', 
+                    name='net_layer2')(net_layer)
+            triangle_layer = Lambda(Network.get_triangle, input_shape=(_NC2,), 
+                    output_shape=(n_atoms,n_atoms), 
+                    name='triangle_layer')(net_layer2)
+            eij_layer = Lambda(Network.get_FE_eij_matrix,
+                    input_shape=(n_atoms,n_atoms), 
+                    #output_shape=(1,),
+                    output_shape=(n_atoms*3+1,),
+                    name='eij_layer', arguments={'coords':coords_layer, 
+                    'max_FE':max_FE}
+                    )(triangle_layer)
+
+        else:
+            print('with_custom')
+            #### WITH CUSTOM LAYERS
+            coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
+            NRF_layer = CoordsToNRF(atoms2, max_NRF, name='NRF_layer')(
+                    coords_layer)
+            flatten_NRF = FlatTriangle(_NC2, name='flatten_NRF')(NRF_layer)
+            net_layer = Dense(units=1000, activation='sigmoid', 
+                    name='net_layer')(flatten_NRF)
+            net_layer2 = Dense(units=_NC2, activation='sigmoid', 
+                    name='net_layer2')(net_layer)
+            triangle_layer = Triangle(n_atoms, name='triangle_layer')(
+                    net_layer2)
+            eij_layer = EijMatrix(n_atoms, max_FE, name='eij_layer')(
+                    [triangle_layer, coords_layer])
+
+        model = Model(inputs=[coords_layer], outputs=[eij_layer, net_layer2])
+        model.compile(#loss=cl,
+                #loss='mse', 
+                #loss={'decomp_layer': 'mse'}, #, 'recompFE_layer': cl},
+                loss={'eij_layer': cl, 'net_layer2': 'mse'},
+                optimizer='adam', 
+                metrics=['mae']) #, 'acc']) #mean abs error, accuracy
         model.summary()
-        sys.stdout.flush()
+        fit = True
+        if fit:
+            model.fit(train_input_coords, 
+                    [train_output_FE, train_output_matFE_scaled],
+                    epochs=200000, 
+                    verbose=2,
+                    #callbacks=[es],
+                    callbacks=[es,mc],
+                    )
+            model.save_weights('model/model_weights.h5')
+        else:
+            '''
+            model = load_model(file_name, 
+                    custom_objects={'CoordsToNRF': CoordsToNRF, 
+                        'FlatTriangle': FlatTriangle, 'Traingle': Triangle,
+                        'EijMatrix': EijMatrix, 
+                        #'custom_loss': custom_loss1(weights)
+                        })
+            '''
+            model.load_weights('model/model_weights.h5')
+
+        prediction = model.predict(train_input_coords)
+        #prediction = prediction[:,-1].flatten()
+        train_prediction = prediction[0][:,-1].flatten()
+
+        print('prediction')
+        print(train_prediction)
+        print('actual E')
+        print(train_output_E.flatten())
+        print('diff')
+        print(train_output_E.flatten() - train_prediction)
+
+        train_mae, train_rms = Binner.get_error(train_output_E.flatten(), 
+                    train_prediction.flatten())
+        print('\nTrain MAE: {} \nTrain RMS: {}'.format(train_mae, train_rms))
 
 
-        model.fit(input, output, epochs=1000, verbose=2,
-                #callbacks=[es],
-                #callbacks=[es,mc],
-                )
+        prediction = model.predict(test_input_coords)
+        #prediction = prediction[:,-1].flatten()
+        test_prediction = prediction[0][:,-1].flatten()
 
-        #model = load_model('model.h5')
-        print('train', model.evaluate(input, output, verbose=2))
+        print('prediction')
+        print(test_prediction)
+        print('actual E')
+        print(test_output_E.flatten())
+        print('diff')
+        print(test_output_E.flatten() - test_prediction)
 
-        pred_input = molecule.coords[0].reshape(-1,n_atoms*3)
-        print(pred_input.shape) 
-        prediction = model.predict(pred_input)
-        print('\npred', prediction)
-        print('\nactual', molecule.forces[0], molecule.energies[0])
+        test_mae, test_rms = Binner.get_error(test_output_E.flatten(), 
+                    test_prediction.flatten())
+        print('\nTest MAE: {} \nTest RMS: {}'.format(test_mae, test_rms))
+
+        scurves = True
+        if scurves:
+            train_bin_edges, train_hist = Binner.get_scurve(
+                    train_output_E.flatten(), 
+                    train_prediction.flatten(), 
+                    'train-hist.txt')
+
+            test_bin_edges, test_hist = Binner.get_scurve(
+                    test_output_E.flatten(), #actual
+                    test_prediction.flatten(), #prediction
+                    'test-hist.txt')
+           
+            Plotter.plot_2d([train_bin_edges, test_bin_edges], 
+                    [train_hist, test_hist], ['train', 'test'], 
+                    'Error', '% of points below error', 's-curves.png')
+
+        #last_layer_output = Model(inputs=model.input, 
+                #outputs=model.get_layer('eij_layer').output)
+        #FE = NRF_layer_output.predict(train_input)
 
 
     def get_decompE_sum_model(self, molecule, nodes, input, output):
@@ -652,7 +856,7 @@ class Network(object):
         print('max depth: {}\nn_nodes: {}\nn_epochs: {}'.format(
                 max_depth, n_nodes, n_epochs))
 
-        train_net = False
+        train_net = True
         if train_net:
             for i in range(0, max_depth):
                 if i > 0:
@@ -667,7 +871,8 @@ class Network(object):
                         metrics=['mae', 'acc']) #mean abs error, accuracy
                 model.summary()
                 model.fit(scaled_input, scaled_output, epochs=n_epochs, 
-                        verbose=2, callbacks=[mc,es])
+                        verbose=2, callbacks=[mc,es]
+                        )
 
                 #'''
                 model = load_model(file_name)
@@ -757,61 +962,6 @@ class Network(object):
                 train_output, train_prediction)
 
         return train_prediction, test_prediction
-
-
-    def pairwise_NN(scaled_input, scaled_output, nodes, _NC2):
-        '''For each pairwise NRF input, create a 1000 node dense layer and
-        then concat these models back into one.'''
-        print('scaled_input shape:', scaled_input.shape)
-        scaled_input = scaled_input.T
-        print('scaled_input shape:', scaled_input.shape)
-        scaled_output = scaled_output.T
-
-        file_name = 'best_ever_model'
-        mc = ModelCheckpoint(file_name, monitor='loss', 
-                mode='min', save_best_only=True)
-        es = EarlyStopping(monitor='loss', patience=500)
-        n_nodes = nodes #10 #1000
-        n_epochs = 1000 #100000
-        print('n_nodes: {}\nn_epochs: {}'.format(n_nodes, n_epochs))
-
-        new_scaled_input = []
-        new_scaled_output = []
-        model_input = []
-        model_output = []
-        for i in range(_NC2):
-            model_in = Input(shape=(1,))
-            net = Dense(units=n_nodes, activation='sigmoid')(model_in)
-            net = Dense(units=1, activation='sigmoid')(net)
-            model_in = Model(model_in, net)
-            model_in.summary()
-            new_scaled_input.append(scaled_input[i])
-            new_scaled_output.append(scaled_output[i])
-            model_input.append(model_in.input)
-            model_output.append(model_in.output)
-
-        #model_out = concatenate(model_output)
-        #model_out = Dense(units=_NC2, activation='linear')(model_out)
-        model = Model(inputs=model_input, outputs=model_output)
-        model.compile(loss='mse', optimizer='adam', 
-            metrics=['mae', 'acc']) #mean abs error, accuracy
-        model.summary()
-        model.fit(new_scaled_input, new_scaled_output, epochs=n_epochs, 
-                verbose=2, callbacks=[es,mc])
-
-        model = load_model(file_name)
-        print('train', model.evaluate(new_scaled_input, new_scaled_output, 
-                verbose=2))
-        train_prediction_scaled = model.predict(new_scaled_input)
-        train_prediction_scaled = np.array(
-                train_prediction_scaled).reshape(-1,_NC2)
-        #print('train_prediction_scaled', train_prediction_scaled)
-        #train_prediction_scaled = train_prediction_scaled[0].reshape(-1,_NC2)
-        print('train_prediction_scaled shape', train_prediction_scaled.shape)
-        #print('scaled_output', scaled_output.T, scaled_output.T.shape)
-
-        print()
-        return train_prediction_scaled
 
 
     def get_validation(molecule, input, output, header, atom_names, 

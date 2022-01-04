@@ -59,13 +59,14 @@ def run_force_pred(input_files='input_files',
     NPParser(atom_file, coord_files, force_files, energy_files, molecule)
 
 
-    '''
+    #'''
     ##shorten num molecules here:
-    trunc = 100
-    molecule.coords = molecule.coords[0:trunc]
-    molecule.forces = molecule.forces[0:trunc]
-    molecule.energies = molecule.energies[0:trunc]
-    '''
+    end = len(molecule.coords)
+    step = 50 #500
+    molecule.coords = molecule.coords[0:end:step]
+    molecule.forces = molecule.forces[0:end:step]
+    molecule.energies = molecule.energies[0:end:step]
+    #'''
 
 
     '''
@@ -157,14 +158,28 @@ def run_force_pred(input_files='input_files',
 
     get_decompFE = True
     if get_decompFE:
+
         print('\nget decomposed forces and energies simultaneously')
+
         #for some reason, using r as the bias does not give back recomp 
         #values, no idea why!
         Converter.get_simultaneous_interatomic_energies_forces(molecule, 
                 bias_type)
+
+        '''
+        #save to file for Neil
+        kj2kcal = 1/4.184
+        au2kcalmola = Converter.Eh2kcalmol / Converter.au2Ang
+        print(molecule.forces[-1])
+        np.savetxt('matrix_FE.dat', (molecule.mat_FE[-1]/kj2kcal).reshape(-1,_NC2))
+        np.savetxt('F.dat', (molecule.forces[-1]/au2kcalmola).reshape(-1,3))
+        np.savetxt('E.dat', (molecule.energies[-1]/kj2kcal).reshape(-1,1))
+        np.savetxt('matrix_eij.dat', molecule.mat_eij[-1].reshape(-1,_NC2))
+        '''
         for i in range(1):
             print('\ni', i)
             print('\nmat_FE', molecule.mat_FE[i])
+            print('\nsum mat_FE', np.sum(molecule.mat_FE[i]))
             print('\nget recomposed FE')
             print('actual')
             print(molecule.forces[i])
@@ -197,8 +212,8 @@ def run_force_pred(input_files='input_files',
     sys.exit()
     #'''
 
-    run_net = False
-    split = 20 #2 4 5 20 52 260
+    run_net = True
+    split = 2#0 #2 4 5 20 52 260
     if run_net:
         train = round(len(molecule.coords) / split, 3)
         nodes = 1000
@@ -259,7 +274,7 @@ def run_force_pred(input_files='input_files',
         print('\nEnergies:\nTrain MAE: {} \nTrain RMS: {} \nTest MAE: {} '\
                 '\nTest RMS: {}'.format(train_mae, train_rms, 
                 test_mae, test_rms))
-        print(train_e, train_pred_e)
+        #print(train_e, train_pred_e)
 
     if get_decompF:
         train_pred_f = Conservation.get_recomposed_forces(train_input, 
@@ -280,7 +295,7 @@ def run_force_pred(input_files='input_files',
         test_pred_f, test_pred_e = Converter.get_recomposed_FE(test_input, 
                 test_prediction, molecule.atoms, n_atoms, _NC2, bias_type)
 
-        print(train_e, train_pred_e)
+        #print(train_e, train_pred_e)
         train_mae, train_rms = Binner.get_error(train_e.flatten(), 
                     train_pred_e.flatten())
         test_mae, test_rms = Binner.get_error(test_e.flatten(), 
@@ -293,8 +308,8 @@ def run_force_pred(input_files='input_files',
         train_pred_e = np.subtract(train_pred_e / prescale[1], prescale[0])
         test_e = np.subtract(test_e / prescale[1], prescale[0])
         test_pred_e = np.subtract(test_pred_e / prescale[1], prescale[0])
-        print(train_e, train_pred_e)
-        print(train_f[0], train_pred_f[0])
+        #print(train_e, train_pred_e)
+        #print(train_f[0], train_pred_f[0])
         train_mae, train_rms = Binner.get_error(train_e.flatten(), 
                     train_pred_e.flatten())
         test_mae, test_rms = Binner.get_error(test_e.flatten(), 

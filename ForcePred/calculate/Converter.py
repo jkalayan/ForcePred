@@ -22,6 +22,7 @@ class Converter(object):
     Eh2kJmol = Eh2kcalmol * kcal2kj #hartree to kJ/mol
     au2kJmola = Eh2kJmol / au2Ang #convert from Eh/a_0 to kJ/(mol Ang)
     au2kcalmola = Eh2kcalmol * au2Ang ###convert from Eh/a_0 to kcal/(mol Ang)
+    au2kcalmola = np.float64(au2kcalmola)
     rad2deg = float(180) / float(np.pi) #radians to degrees
     ang2m = 1e-10
     m2ang = 1e10
@@ -379,6 +380,7 @@ class Converter(object):
         molecule.mat_NRF = np.zeros((n_structures, _NC2))
         molecule.mat_bias = np.zeros((n_structures, _NC2))
         molecule.mat_FE = np.zeros((n_structures, _NC2))
+        molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, _NC2))
         for s in range(n_structures):
             mat_r = np.zeros((_NC2))
             mat_Fvals = np.zeros((n_atoms, 3, _NC2))
@@ -396,6 +398,7 @@ class Converter(object):
                     if bias_type != 'NRF':
                         bias = Converter.get_bias(zi, zj, r, bias_type)
                     molecule.mat_bias[s,_N] = bias
+                    molecule.mat_eij[s,n_atoms*3,_N] = bias
                     for x in range(0, 3):
                         val = ((molecule.coords[s][i][x] - 
                                 molecule.coords[s][j][x]) / mat_r[_N])
@@ -403,6 +406,8 @@ class Converter(object):
                             val *= bias
                         mat_Fvals[i,x,_N] = val
                         mat_Fvals[j,x,_N] = -val
+                        molecule.mat_eij[s,i*3+x,_N] = val
+                        molecule.mat_eij[s,j*3+x,_N] = -val
 
             mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2)
             forces2 = molecule.forces[s].reshape(n_atoms*3)
