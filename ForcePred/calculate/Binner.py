@@ -121,13 +121,16 @@ class Binner(object):
         _N = np.size(all_actual)
         mae = 0
         rms = 0
+        msd = 0 #mean signed deviation
         for actual, prediction in zip(all_actual, all_prediction):
             diff = prediction - actual
             mae += np.sum(abs(diff))
             rms += np.sum(diff ** 2)
+            msd += np.sum(diff)
         mae = mae / _N
         rms = (rms / _N) ** 0.5
-        return mae, rms
+        msd = msd / _N
+        return mae, rms, msd
 
     def get_each_error(actual, prediction):
         '''Get RMS and MAE for each array'''

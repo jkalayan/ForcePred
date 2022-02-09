@@ -45,28 +45,19 @@ def run_force_pred(input_files='input_files',
         input_files = open(list_files).read().split()
     #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
     #OPTParser(input_files, molecule, opt=True) #read in FCEZ for opt
-
-    '''
-    AMBERParser('molecules.prmtop', coord_files, force_files, 
-            molecule)
-    '''
-
-    '''
-    XYZParser(atom_file, coord_files, force_files, 
-            energy_files, molecule)
-    '''
-
+    #AMBERParser('molecules.prmtop', coord_files, force_files, molecule)
+    #XYZParser(atom_file, coord_files, force_files, energy_files, molecule)
     NPParser(atom_file, coord_files, force_files, energy_files, molecule)
 
 
-    #'''
+    '''
     ##shorten num molecules here:
     end = len(molecule.coords)
-    step = 50 #500
+    step = 50
     molecule.coords = molecule.coords[0:end:step]
     molecule.forces = molecule.forces[0:end:step]
     molecule.energies = molecule.energies[0:end:step]
-    #'''
+    '''
 
 
     '''
@@ -88,25 +79,101 @@ def run_force_pred(input_files='input_files',
     A = Molecule.find_bonded_atoms(molecule.atoms, molecule.coords[0])
     print(molecule.atoms)
     print(A)
+    indices, pairs_dict = Molecule.find_equivalent_atoms(
+            molecule.atoms, A)
+    print('indices', indices)
+    print('pairs_dict', pairs_dict)
     sys.stdout.flush()
 
 
+
+
+    split = 100 #500 #200 #100
+    train = round(len(molecule.coords) / split, 3)
+    print('\nget train and test sets, '\
+            'training set is {} points'.format(train))
+    Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
+            split) #get train and test sets
+    train_forces = np.take(molecule.forces, molecule.train, axis=0)
+    train_energies = np.take(molecule.energies, molecule.train, axis=0)
+
+
+    forces_min = np.min(molecule.forces)
+    forces_max = np.max(molecule.forces)
+    forces_diff = forces_max - forces_min
+    #print(forces_diff)
+    forces_rms = np.sqrt(np.mean(molecule.forces.flatten()**2))
+    energies_rms = np.sqrt(np.mean(molecule.energies.flatten()**2))
+    forces_mean = np.mean(molecule.forces.flatten())
+    energies_mean = np.mean(molecule.energies.flatten())
+    energies_max = np.max(np.absolute(molecule.energies))
+    #molecule.energies = (molecule.energies - energies_mean) / energies_rms
+    #molecule.forces = (molecule.forces * 0) # forces_rms)
+
+
+    print('E ORIG min: {} max: {}'.format(np.min(molecule.energies), 
+            np.max(molecule.energies)))
+    print('train E ORIG min: {} max: {}'.format(np.min(train_energies), 
+            np.max(train_energies)))
+    print('F ORIG min: {} max: {}'.format(np.min(molecule.forces), 
+            np.max(molecule.forces)))
+    print('train F ORIG min: {} max: {}'.format(np.min(train_forces), 
+            np.max(train_forces)))
     prescale_energies = True
-    prescale = 0
+    #prescale = [0, 1, 0, energies_mean, forces_rms, energies_max, forces_max]
+    prescale = [0, 1, 0, 1]
     if prescale_energies:
+        #'''
         print('\nprescale energies so that magnitude is comparable to forces')
-        prescale = np.max(np.absolute(molecule.energies))
-        max_f = np.max(np.absolute(molecule.forces))
+        '''
+        forces_rms =np.sqrt(np.mean(molecule.forces.flatten()**2))
+        energies_mean = np.mean(molecule.energies.flatten())
+        abs_max_e = np.max(np.absolute(molecule.energies))
+        abs_max_f = np.max(np.absolute(molecule.forces))
+        prescale[0] = abs_max_e
+        prescale[1] = abs_max_f
+        #molecule.energies = np.add(molecule.energies, prescale[0]) * \
+                #prescale[1] #orig
+        molecule.energies = molecule.energies + prescale[0]
+        prescale[2] = np.max(np.absolute(molecule.energies))
+        molecule.energies = molecule.energies - prescale[2]/2
+        '''
+        min_e = np.min(train_energies)
+        max_e = np.max(train_energies)
+        min_f = np.min(train_forces)
+        max_f = np.max(train_forces)
+
+        molecule.energies = ((max_f - min_f) * (molecule.energies - min_e) / 
+                (max_e - min_e) + min_f)
+
+        prescale[0] = min_e
+        prescale[1] = max_e
+        prescale[2] = min_f
+        prescale[3] = max_f
+
+        print('E SCALED min: {} max: {}'.format(np.min(molecule.energies), 
+                np.max(molecule.energies)))
+
+        #'''
+
+        '''
+        print('\nprescale energies so that magnitude is comparable to forces')
         print('ORIG min: {} max: {}'.format(np.min(molecule.energies), 
                 np.max(molecule.energies)))
-        prescale = [prescale, max_f]
-        molecule.energies = np.add(molecule.energies, prescale[0]) * \
-                prescale[1]
+        forces_rms = 1 #np.sqrt(np.mean(molecule.forces.flatten()**2))
+        energies_mean = np.mean(molecule.energies.flatten())
+        print(molecule.energies[0])
+        molecule.energies = (molecule.energies - energies_mean) / forces_rms
+        print(molecule.energies[0])
+        prescale = [energies_mean, forces_rms]
+        print((molecule.energies[0] * prescale[1]) + prescale[0])
         print('SCALED min: {} max: {}'.format(np.min(molecule.energies), 
                 np.max(molecule.energies)))
         print('prescale value:', prescale)
-        #sys.exit()
-        sys.stdout.flush()
+        '''
+    print('prescale value:', prescale)
+    sys.stdout.flush()
+
 
     #Converter(molecule) #get pairwise forces
     #sys.exit()
@@ -145,16 +212,20 @@ def run_force_pred(input_files='input_files',
         sys.stdout.flush()
         #sys.exit()
 
-    get_decompE = False
-    bias_type = '1/r'  #'1/r' # #'NRF'
+    get_decompE = True
+    bias_type = '1/r' # #'NRF'
     print('\nenergy bias type: {}'.format(bias_type))
     if get_decompE:
         print('\nget mat_E')
         Converter.get_interatomic_energies(molecule, bias_type)
         print('molecule energy', molecule.energies[0])
+        print('mat_E', molecule.mat_E[0])
         print('sum mat_E', np.sum(molecule.mat_E[0]))
+        print('recompE', np.dot(molecule.mat_bias[0], molecule.mat_E[0]))
         print(datetime.now() - startTime)
         sys.stdout.flush()
+        #sys.exit()
+
 
     get_decompFE = True
     if get_decompFE:
@@ -200,12 +271,26 @@ def run_force_pred(input_files='input_files',
             '''
             print(datetime.now() - startTime)
             sys.stdout.flush()
+
+    #molecule.mat_FE = molecule.mat_E
+    #print('\n!!!!!!!!! *** using mat_E instead of mat_FE *** !!!!!!!!!!!')
     #sys.exit()
+
+    '''
+    decompE = Converter.get_energy_decomposition(molecule.atoms, 
+            molecule.coords[0], molecule.energies[0])
+    recompE = Converter.get_recomposed_energy(molecule.coords[0], 
+            decompE, n_atoms, _NC2)
+    print(molecule.energies[0])
+    print(decompE)
+    print(recompE)
+    sys.exit()
+    '''
 
     #'''
     print('\ninternal FE decomposition')
     network = Network(molecule)
-    Network.get_coord_FE_model(network, molecule)
+    Network.get_coord_FE_model(network, molecule, prescale)
     print('exit')
     print(datetime.now() - startTime)
     sys.stdout.flush()

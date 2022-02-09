@@ -90,9 +90,8 @@ class OPTParser(object):
                                 * Converter.Eh2kcalmol / Converter.au2Ang
                                 #* Converter.au2kJmola ##!!!!!!!
 
-
-
                         #print('f', force.shape)
+
                     if 'Mulliken charges:' in line:
                         charges = self.clean(self.extract(1, input_), 1)
                     if 'ESP charges:' in line: #override with ESP

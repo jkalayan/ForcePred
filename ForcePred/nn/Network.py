@@ -5,12 +5,14 @@ This module is for running a NN with a training set of data.
 '''
 from __future__ import print_function #for tf printing
 import numpy as np
+import keras
 from keras.layers import Input, Dense, Lambda, concatenate, Layer, \
         initializers, Add, Multiply
 from keras.models import Model, load_model                                   
-from keras.callbacks import ModelCheckpoint, EarlyStopping
+from keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 from keras import backend as K                                              
 import tensorflow as tf
+#import tensorflow_addons as tfa
 #import tensorflow_probability as tfp
 from functools import partial
 from ..calculate.MM import MM
@@ -30,6 +32,216 @@ sess = tf.Session()
 from keras import backend as K
 K.set_session(sess)
 '''
+
+class CoordsToNRF_test(Layer):
+    def __init__(self, atoms_flat, atoms2, max_NRF, _NC2, name):
+        super(CoordsToNRF_test, self).__init__()
+        self.atoms_flat = atoms_flat
+        self.atoms2 = tf.Variable(atoms2)
+        self.max_NRF = tf.Variable(max_NRF)
+        self._NC2 = _NC2
+        self.name = name
+        self.au2kcalmola = tf.Variable(627.5095 * 0.529177)
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        n_atoms = input_shape[1]
+        #return (batch_size, n_atoms, n_atoms)
+        return (batch_size, self._NC2)
+
+    def call(self, coords):
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
+        #flatten diff2 so that _NC2 values are left
+        tri = tf.linalg.band_part(diff2, -1, 0) #lower
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        diff_flat = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        r = diff_flat**0.5
+        _NRF = (((self.atoms_flat * self.au2kcalmola) / (r ** 2)) / 
+                self.max_NRF) #scaled
+        return _NRF
+
+
+class ScaleFE(Layer):
+    def __init__(self, _NC2, max_FE, name):
+        super(ScaleFE, self).__init__()
+        self._NC2 = _NC2
+        self.max_FE = max_FE
+        self.name = name
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, self._NC2)
+
+    def call(self, decompFE):
+        #rescale decompFE
+        decompFE_scaled = (decompFE - 0.5) * (2 * self.max_FE)
+        return decompFE_scaled
+
+class EijMatrix_test(Layer):
+    def __init__(self, n_atoms, _NC2, max_FE, prescale, name):
+        super(EijMatrix_test, self).__init__()
+        self.max_FE = max_FE
+        self.n_atoms = n_atoms
+        self._NC2 = _NC2
+        self.prescale = prescale
+        self.name = name
+
+    def compute_output_shape(self, input_shape):
+        #batch_size = input_shape[0][0]
+        batch_size = input_shape[0]
+        return (batch_size, 1)
+        #return (batch_size, self.n_atoms*3+1)
+        #return (batch_size, self._NC2)
+        #return (batch_size, self.n_atoms, self.n_atoms, 1)
+        #return (batch_size, self.n_atoms, 3)
+
+    def call(self, decompFE_coords):
+    #def call(self, coords):
+        '''decompFE is a sq upper and lower triangle matrix, from coords we 
+        get the eij matrices for Fs and Es.'''
+        decompFE = decompFE_coords[:,:,3:]
+        coords = decompFE_coords[:,:,:3]
+
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
+        #flatten diff2 so that _NC2 values are left
+        tri = tf.linalg.band_part(diff2, -1, 0) #lower
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        diff_flat = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        r_flat = diff_flat**0.5
+
+        #get energy 1/r_ij eij matrix
+        recip_r_flat = 1 / r_flat
+        Q3 = Triangle(self._NC2, self.name)(recip_r_flat)
+        eij_E = tf.expand_dims(Q3, 3)
+        #dot product of 
+        E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
+        E = E2/2
+        #E3 = (E / self.prescale[1]) - self.prescale[0] #orig scale
+        #E3 = (E + self.prescale[2]/2) - self.prescale[0]
+        #E3 = ((E / self.prescale[3]) * self.prescale[2]) #\
+                #* self.prescale[3] + self.prescale[2]
+        #E3 = (E * self.prescale[1]) + self.prescale[0]
+        E3 = ((E - self.prescale[2]) / 
+                (self.prescale[3] - self.prescale[2]) * 
+                (self.prescale[1] - self.prescale[0]) + self.prescale[0])
+
+        '''
+        #### FOR FORCES IF REQUIRED
+        r = Triangle(self._NC2, self.name)(r_flat)
+        r2 = tf.expand_dims(r, 3)
+        eij_F2 = diff / r2
+        eij_F = tf.where(tf.is_nan(eij_F2), tf.zeros_like(eij_F2), eij_F2) 
+            #remove nans
+        F = tf.einsum('bijk, bij -> bik', eij_F, decompFE)
+        F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
+        FE = tf.concat([F_reshaped, E], axis=1)
+        '''
+
+        return E3
+
+class EijMatrix_test2(Layer):
+    def __init__(self, n_atoms, _NC2, max_FE, prescale, name):
+        super(EijMatrix_test2, self).__init__()
+        self.max_FE = max_FE
+        self.n_atoms = n_atoms
+        self._NC2 = _NC2
+        self.prescale = prescale
+        self.name = name
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        #return (batch_size, 1)
+        #return (batch_size, self.n_atoms*3+1)
+        #return (batch_size, self._NC2)
+        #return (batch_size, self.n_atoms, self.n_atoms, 1)
+        return (batch_size, self.n_atoms, 3)
+
+    def call(self, decompFE_coords):
+    #def call(self, coords):
+        '''decompFE is a sq upper and lower triangle matrix, from coords we 
+        get the eij matrices for Fs and Es.'''
+        decompFE = decompFE_coords[:,:,3:]
+        coords = decompFE_coords[:,:,:3]
+
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
+        #flatten diff2 so that _NC2 values are left
+        tri = tf.linalg.band_part(diff2, -1, 0) #lower
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        diff_flat = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        r_flat = diff_flat**0.5
+        
+        '''
+        #get energy 1/r_ij eij matrix
+        recip_r_flat = 1 / r_flat
+        Q3 = Triangle(self._NC2, self.name)(recip_r_flat)
+        eij_E = tf.expand_dims(Q3, 3)
+        #dot product of 
+        E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
+        E = E2/2
+        E3 = (E / self.prescale[1]) - self.prescale[0] #orig scale
+        #E3 = ((E / self.prescale[3]) * self.prescale[2]) #\
+                #* self.prescale[3] + self.prescale[2]
+        #E3 = (E * self.prescale[1]) + self.prescale[0]
+        '''
+
+        #'''
+        #### FOR FORCES IF REQUIRED
+        r = Triangle(self._NC2, self.name)(r_flat)
+        r2 = tf.expand_dims(r, 3)
+        eij_F2 = diff / r2
+        eij_F = tf.where(tf.is_nan(eij_F2), tf.zeros_like(eij_F2), eij_F2) 
+            #remove nans
+        F = tf.einsum('bijk, bij -> bik', eij_F, decompFE)
+        #F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
+        #FE = tf.concat([F_reshaped, E], axis=1)
+        #'''
+
+        return F
+
+
+class TotalEnergy_test(Layer):
+    def __init__(self, prescale, n_atoms, _NC2, name):
+        super(TotalEnergy_test, self).__init__()
+        self.prescale = prescale
+        self.n_atoms = n_atoms
+        self._NC2 = _NC2
+        self.name = name
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        #return (batch_size, self.n_atoms*3+1)
+        #return (batch_size, self.n_atoms, 3)
+        #return (batch_size, self.n_atoms, self.n_atoms)
+        #return (batch_size, self._NC2)
+        return (batch_size, 1)
+
+    def call(self, E):
+        E2 = (E / self.prescale[1]) - self.prescale[0]
+        return E2
+        '''
+        coords = tf.reshape(coords_E[:,:-1], shape=(tf.shape(coords_E)[0], 
+                self.n_atoms, 3))
+        E = coords_E[:,-1]
+        gradients = tf.gradients(E, coords, 
+                colocate_gradients_with_ops=True, 
+                unconnected_gradients='zero')
+        return gradients * -1 #E2
+        '''
 
 
 class CoordsToNRF(Layer):
@@ -51,7 +263,7 @@ class CoordsToNRF(Layer):
         #distance between all pairs
         a = tf.expand_dims(coords, 2)
         b = tf.expand_dims(coords, 1)
-        diff = a - b
+        diff = a - b  
         r = tf.reduce_sum(diff**2, axis=-1)**0.5
         #get NRF and scale
         _NRF = ((self.atoms2 * self.au2kcalmola) / (r ** 2)) / self.max_NRF
@@ -100,6 +312,9 @@ class Triangle(Layer):
                 tensorflow-equivalent-for-this-matlab-code
         '''
         decompFE = tf.convert_to_tensor(decompFE, dtype=tf.float32)
+        #rescale decompFE
+        #decompFE = ((decompFE - 0.5) * (2 * self.max_FE))
+
         decompFE.get_shape().with_rank_at_least(1)
 
         #put batch dimensions last
@@ -133,6 +348,7 @@ class Triangle(Layer):
         Q2 = tf.transpose(result_transposed, tf.concat(
                 [tf.range(2, tf.rank(decompFE)+1), [1,0]], axis=0))
         Q3 = Q + Q2
+
         return Q3
 
 
@@ -176,6 +392,21 @@ class EijMatrix(Layer):
         F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
         FE = tf.concat([F_reshaped, E], axis=1)
         return FE
+
+
+class TotalEnergy(Layer):
+    def __init__(self, prescale, name):
+        super(TotalEnergy, self).__init__()
+        self.prescale = prescale
+        self.name = name
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, 1)
+
+    def call(self, FE):
+        E = (FE[:,-1] / self.prescale[1]) - self.prescale[0]
+        return E
 
 
 class Network(object):
@@ -235,7 +466,7 @@ class Network(object):
         eij_F = tf.where(tf.is_nan(eij), tf.zeros_like(eij), 
                 eij) #remove nans
         #get energy 1/r_ij eij matrix
-        recip_r = 1 / r
+        recip_r = 1 #/ r ##!!!!!!! 1/r bias not included !!!
         recip_r2 = tf.where(tf.is_inf(recip_r), tf.zeros_like(recip_r), 
                 recip_r) #remove infs
         eij_E = tf.expand_dims(recip_r2, 3)
@@ -326,7 +557,7 @@ class Network(object):
         return triangle_NRF
 
 
-    def get_coord_FE_model(self, molecule):
+    def get_coord_FE_model(self, molecule, prescale1):
         '''Input coordinates and z_types into model to get NRFS which then 
         are used to predict decompFE, which are then recomposed to give
         Cart Fs and molecular E, both of which could be used in the loss
@@ -341,12 +572,21 @@ class Network(object):
         atoms2 = tf.tensordot(tf.expand_dims(atoms_, 0), 
                 tf.expand_dims(atoms_, 0), axes=[[0],[0]])
 
-        split = 2
+        atoms_flat = []
+        for i in range(n_atoms):
+            for j in range(i):
+                ij = atoms[i] * atoms[j]
+                atoms_flat.append(ij)
+        atoms_flat = tf.convert_to_tensor(atoms_flat) #_NC2
+
+        split = 100 #500 #200 #100
         train = round(len(molecule.coords) / split, 3)
         print('\nget train and test sets, '\
                 'training set is {} points'.format(train))
         Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
                 split) #get train and test sets
+
+
 
         input_coords = molecule.coords#.reshape(-1,n_atoms*3)
         input_NRF = molecule.mat_NRF.reshape(-1,_NC2)
@@ -354,38 +594,568 @@ class Network(object):
         output_matFE = molecule.mat_FE.reshape(-1,_NC2)
         output_FE = np.concatenate((molecule.forces.reshape(-1,n_atoms*3), 
                 molecule.energies.reshape(-1,1)), axis=1)
+        output_F = molecule.forces.reshape(-1,n_atoms*3)
         output_E = molecule.energies.reshape(-1,1)
+        output_E_postscale = ((output_E - prescale1[2]) / 
+                (prescale1[3] - prescale1[2]) * 
+                (prescale1[1] - prescale1[0]) + prescale1[0])
 
         train_input_coords = np.take(input_coords, molecule.train, axis=0)
         test_input_coords = np.take(input_coords, molecule.test, axis=0)
         train_input_NRF = np.take(input_NRF, molecule.train, axis=0)
+        test_input_NRF = np.take(input_NRF, molecule.test, axis=0)
         train_input_eij = np.take(input_eij, molecule.train, axis=0)
         train_output_matFE = np.take(output_matFE, molecule.train, axis=0)
+        test_output_matFE = np.take(output_matFE, molecule.test, axis=0)
         train_output_FE = np.take(output_FE, molecule.train, axis=0)
         train_output_E = np.take(output_E, molecule.train, axis=0)
         test_output_E = np.take(output_E, molecule.test, axis=0)
 
+        train_mat_r = np.take(molecule.mat_r, molecule.train, axis=0)
+        train_forces = np.take(molecule.forces, molecule.train, axis=0)
+        test_forces = np.take(molecule.forces, molecule.test, axis=0)
+
         max_NRF1 = np.max(train_input_NRF)
         max_FE1 = np.max(np.abs(train_output_FE))
         train_output_matFE_scaled = train_output_matFE / (2 * max_FE1) + 0.5
+        train_input_NRF_scaled = np.take(input_NRF, molecule.train, axis=0)\
+                / max_NRF1
         print(train_input_coords.shape, train_output_FE.shape)
         print('max_NRF: {}, max_FE: {}'.format(max_NRF1, max_FE1))
         max_NRF = tf.constant(max_NRF1, dtype=tf.float32)
         max_FE = tf.constant(max_FE1, dtype=tf.float32)
+        prescale = tf.constant(prescale1, dtype=tf.float32)
+
+
+        '''
+        ##hard code permutations for now
+        print('\n!!!! permuting hard-coded')
+        orig_perm = [0,2,3,4,6,7,5,8]
+        new_perm = [2,0,4,3,7,6,8,5]
+        train_input_coords2 = np.copy(train_input_coords)
+        train_input_coords2[:, orig_perm] = train_input_coords2[:, new_perm]
+        train_forces2 = np.copy(train_forces)
+        train_forces2[:, orig_perm] = train_forces[:, new_perm]
+        train_output_E2 = np.copy(train_output_E)
+        train_input_coords = np.concatenate((train_input_coords, 
+                train_input_coords2), axis=0)
+        train_forces = np.concatenate((train_forces, train_forces2), axis=0)
+        train_output_E = np.concatenate((train_output_E, train_output_E2), 
+                axis=0)
+        train_output_matFE = \
+                Converter.get_simultaneous_interatomic_energies_forces2(
+                molecule.atoms, train_input_coords, train_forces, 
+                train_output_E, bias_type='1/r')
+        Writer.write_xyz(train_input_coords, molecule.atoms, 
+                'train-coords.xyz', 'w')
+        '''
+
+        equiv_atoms = False
+        if equiv_atoms:
+            print('permutations - sorting of equiv_atoms')
+            A = Molecule.find_bonded_atoms(molecule.atoms, 
+                    molecule.coords[0])
+            indices, pairs_dict = Molecule.find_equivalent_atoms(
+                    molecule.atoms, A)
+            print('indices', indices)
+            print('pairs_dict', pairs_dict)
+            all_sorted_list, all_resorted_list = Molecule.get_sorted_pairs(
+                    train_input_NRF, pairs_dict)
+            print('sorted', all_sorted_list[0])
+            print('resorted', all_resorted_list[0])
+            sys.stdout.flush()
+            #print('\norig input', input)
+            input = np.take_along_axis(train_input_NRF, 
+                    all_sorted_list, axis=1)
+            #print('\nnew input', input)
+            output = np.take_along_axis(train_output_matFE, 
+                    all_sorted_list, axis=1)
+            np.savetxt('orig_input_NRF.txt', train_input_NRF)
+            np.savetxt('orig_output_matFE.txt', train_output_matFE)
+            np.savetxt('perm_input_NRF.txt', input)
+            np.savetxt('perm_output_matFE.txt', output)
+
+            sys.exit()
+
+
+        #train_output_E_postscale = ((train_output_E / prescale1[1]) 
+                #- prescale1[0])
+        #test_output_E_postscale = ((test_output_E / prescale1[1]) 
+                #- prescale1[0])
+        train_output_E_postscale = ((train_output_E - prescale1[2]) / 
+                (prescale1[3] - prescale1[2]) * 
+                (prescale1[1] - prescale1[0]) + prescale1[0])
+        test_output_E_postscale = ((test_output_E - prescale1[2]) / 
+                (prescale1[3] - prescale1[2]) * 
+                (prescale1[1] - prescale1[0]) + prescale1[0])
+
+        val_points = 50
+        print('val points: {}'.format(val_points))
+        ###get validation from within training
+        train2, val = Molecule.make_train_test(train_output_E.flatten(), 
+                n_train=len(train_output_E)-val_points, n_test=val_points)
+        train2_input_coords = np.take(train_input_coords, train2, axis=0)
+        val_input_coords = np.take(train_input_coords, val, axis=0)
+        train2_output_E = np.take(train_output_E, train2, axis=0)
+        val_output_E = np.take(train_output_E, val, axis=0)
+        train2_output_E_postscale = np.take(train_output_E_postscale, 
+                train2, axis=0)
+        val_output_E_postscale = np.take(train_output_E_postscale, 
+                val, axis=0)
+        train2_forces = np.take(train_forces, train2, axis=0)
+        val_forces = np.take(train_forces, val, axis=0)
+        train2_output_matFE = np.take(train_output_matFE, train2, axis=0)
+        val_output_matFE = np.take(train_output_matFE, val, axis=0)
+
+        '''
+        train_forces_rms = np.sqrt(np.mean(train_forces.flatten()**2))
+        train_energies_mean = np.mean(train_output_E.flatten())
+        train_output_E_postscale = ((train_output_E - train_energies_mean) / 
+                train_forces_rms)
+        train_forces = train_forces / train_forces_rms
+        test_output_E_postscale = ((test_output_E - train_energies_mean) / 
+                train_forces_rms)
+        test_forces = test_forces / train_forces_rms
+        '''
+
 
         def custom_loss1(weights):
             def custom_loss(y_true, y_pred):
                 return K.mean(K.abs(y_true - y_pred) * weights) #mae
             return custom_loss
-        weights = np.zeros((n_atoms*3+1))
-        weights[-1] = 0 #1 #* n_atoms
+        weights = 0 #np.zeros((1)) #np.zeros((n_atoms*3+1))
+        #weights[-1] = 0 #1/_NC2 #* n_atoms
         cl = custom_loss1(weights)
+
 
         file_name='best_model'
         mc = ModelCheckpoint(file_name, monitor='loss', mode='min', 
-                save_best_only=True)
+                save_best_only=True, save_weights_only=True)
         es = EarlyStopping(monitor='loss', patience=1000)
 
+        '''
+        #######################---DECOMP-TEST---############################
+        #######################---DECOMP-TEST---############################
+        coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
+        decompFE_layer = Input(shape=(_NC2,), name='decompFE_layer')
+        scale_layer = ScaleFE(_NC2, max_FE, name='scale_layer')(
+                decompFE_layer)
+        triangle_layer = Triangle(n_atoms, name='triangle_layer')(
+                scale_layer)
+        concat_layer = concatenate([coords_layer, triangle_layer])
+        eij_layer = EijMatrix_test(n_atoms, _NC2, max_FE, prescale, 
+                name='eij_layer')(concat_layer)
+
+        model = Model(inputs=[coords_layer, decompFE_layer], 
+                outputs=[eij_layer])
+
+        layer_output = Model(inputs=model.input, 
+                #outputs=model.get_layer('eij_layer').output
+                #outputs=model.get_layer('concatenate_1').output
+                outputs=model.get_layer('triangle_layer').output
+                )
+        out = layer_output.predict([
+            train_input_coords[0].reshape(1,n_atoms,3), 
+            train_output_matFE_scaled[0].reshape(1,_NC2)])
+
+        print('pred\n', out.shape, '\n', out)
+        print('coords\n', train_input_coords[0])
+        print('matFE\n', train_output_matFE[0])
+        print('forces\n', train_forces[0])
+        print('E\n', train_output_E_postscale[0])
+        sys.exit()
+        #######################---DECOMP-TEST---############################
+        #######################---DECOMP-TEST---############################
+        '''
+
+        #######################---TEST---##############################
+        #######################---TEST---##############################
+        coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
+        NRF_layer = CoordsToNRF_test(atoms_flat, atoms2, max_NRF, _NC2, 
+                name='NRF_layer')(coords_layer)
+        net_layer = Dense(units=_NC2*5, activation='sigmoid', 
+                name='net_layer')(NRF_layer)
+        net_layerK = Dense(units=_NC2*4, activation='sigmoid', 
+                name='net_layerK')(net_layer)
+        net_layerL = Dense(units=_NC2*3, activation='sigmoid', 
+                name='net_layerL')(net_layerK)
+        net_layerN = Dense(units=_NC2*2, activation='sigmoid', 
+                name='net_layerN')(net_layerL)
+        net_layer2 = Dense(units=_NC2, activation='sigmoid', 
+                name='net_layer2')(net_layerN)
+        scale_layer = ScaleFE(_NC2, max_FE, name='scale_layer')(net_layer2)
+        triangle_layer = Triangle(n_atoms, name='triangle_layer')(
+                scale_layer)
+        concat_layer = concatenate([coords_layer, triangle_layer])
+        eij_layer = EijMatrix_test(n_atoms, _NC2, max_FE, prescale, 
+                name='eij_layer')(concat_layer)
+        eij_layer2 = EijMatrix_test2(n_atoms, _NC2, max_FE, prescale, 
+                name='eij_layer2')(concat_layer)
+
+        #energy_layer = TotalEnergy_test(prescale, n_atoms, _NC2, 
+                #name='energy_layer')(eij_layer)
+        '''
+        scale_layer2 = ScaleE(_NC2, max_FE, name='scale_layer2')(eij_layer)
+        net_layer3 = Dense(units=1000, activation='sigmoid', 
+                name='net_layer3')(scale_layer2)
+        net_layer4 = Dense(units=_NC2, activation='sigmoid', 
+                name='net_layer4')(net_layer3)
+        unscale_layer = UnscaleE(_NC2, max_FE, name='unscale_layer')(
+                net_layer4)
+        '''
+
+        def custom_gradient(y, x):
+            gradients = tf.gradients(y, x, 
+                    colocate_gradients_with_ops=True, 
+                    unconnected_gradients='zero')
+            return gradients[0] * -1
+
+        dE_dx = Lambda(lambda x: custom_gradient(
+                eij_layer, 
+                coords_layer), name='dE_dx')
+        dE_dx = dE_dx(coords_layer)
+
+        '''
+        optimizers = [tf.keras.optimizers.Adam(learning_rate=1e-5),
+                tf.keras.optimizers.Adam(learning_rate=1e-3)]
+        optimizers_and_layers = [(optimizers[0], model.layers[0:]), 
+                (optimizers[1], model.layers[-1])]
+        custom_optimizer = tfa.optimizers.MultiOptimizer(
+                optimizers_and_layers)
+        '''
+
+        '''
+        def get_lr_metric(optimizer):
+            def lr(y_true, y_pred):
+                return optimizer.lr
+            return lr
+
+        rlrop = ReduceLROnPlateau(monitor='loss', factor=0.8, 
+                patience=50, min_lr=1e-6)
+        optimizer = keras.optimizers.Adam(lr=0.001, 
+                beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=True)
+        lr_metric = get_lr_metric(optimizer)
+        '''
+
+
+
+        model = Model(inputs=[coords_layer], 
+                #outputs=[eij_layer, dE_dx]
+                outputs=[eij_layer, dE_dx, scale_layer, eij_layer2]
+                )
+
+        e_loss = 0 
+        f_loss = 0 
+        grad_loss = 0 #n_atoms**2
+        q_loss = 1 #_NC2
+        print('E loss weight: {} \ndE_dx loss weight: {} \n'\
+                'q loss weight: {} \nrecompF loss: {}'.format(
+                e_loss, grad_loss, q_loss, f_loss))
+        model.compile(#loss='mse', 
+                loss={'eij_layer': 'mse', #cl
+                    'scale_layer': 'mse', #cl
+                    'dE_dx': 'mse', 'eij_layer2': 'mse'},
+                #loss={'eij_layer': 'mse', 'dE_dx': 'mse'},
+                loss_weights={'eij_layer': e_loss, 'dE_dx': grad_loss, 
+                    'scale_layer': q_loss, 'eij_layer2': f_loss},
+                #loss_weights={'eij_layer': e_loss, 'dE_dx': f_loss},
+                #loss_weights={'eij_layer': 1/(n_atoms+1), 
+                    #'dE_dx': n_atoms/(n_atoms+1)},
+                optimizer='adam', #metrics=['mae']
+                #optimizer=optimizer, metrics=[lr_metric],
+                )
+        model.summary()
+
+        print('initial learning rate:', K.eval(model.optimizer.lr))
+
+        load_first = False
+        if load_first:
+            model.load_weights('best_model1')
+
+        fit = True
+        if fit:
+            model.fit(train2_input_coords, 
+                    #[train2_output_E_postscale, train2_forces],
+                    #[train_output_E, train_forces],
+                    [train2_output_E_postscale, 
+                        train2_forces, 
+                        train2_output_matFE, train2_forces],
+                    validation_data=(val_input_coords, 
+                        [val_output_E_postscale, 
+                            val_forces, 
+                            val_output_matFE, val_forces]),
+                    epochs=10000, 
+                    verbose=2,
+                    callbacks=[mc],
+                    #callbacks=[es,mc],
+                    #callbacks=[es,mc,rlrop],
+                    )
+            #model.save_weights('model/model_weights.h5')
+        #model.load_weights('model/model_weights.h5')
+        model.load_weights('best_model')
+
+        best_error = model.evaluate(train_input_coords, 
+                [train_output_E_postscale, 
+                    train_forces, train_output_matFE, train_forces],
+                #[train_output_E_postscale, train_forces],
+                #[train_output_E, train_forces],
+                verbose=0)
+        print('model error: ', best_error)
+        sys.stdout.flush()
+
+
+        layer_output = Model(inputs=model.input, 
+                outputs=model.get_layer('eij_layer').output)
+
+        #energy_layer_output = Model(inputs=model.input, 
+                #outputs=model.get_layer('energy_layer').output)
+
+        grad_layer_output = Model(inputs=model.input, 
+                outputs=model.get_layer('dE_dx').output)
+
+        for i in range(3): #[0, 1000]: #
+            print('\n', i)
+            E = layer_output.predict(
+                    train_input_coords[i].reshape(1,n_atoms,3))
+            print('pred\n', E[0])
+            #print('energy\n', train_output_E[i])
+            #E2 = energy_layer_output.predict(
+                    #train_input_coords[i].reshape(1,n_atoms,3))
+            #print('pred postscale\n', E2[0])
+            print('energy\n', train_output_E_postscale[i])
+            print('coords\n', train_input_coords[i])
+
+            print('forces\n', train_forces[i])
+            grad = grad_layer_output.predict(
+                    train_input_coords[i].reshape(1,n_atoms,3))
+            print('grad_lambda\n', grad[0])
+            variance, translations, rotations = Network.check_invariance(
+                    train_input_coords[i], grad[0])
+            print('variance\n', variance, translations, rotations)
+
+            '''
+            np_train_input_coords = np.asarray([train_input_coords[i]], 
+                    np.float32)
+            tf_train_input_coords = tf.convert_to_tensor(
+                    np_train_input_coords, np.float32)
+            tf_train_input_coords = tf.Variable(tf_train_input_coords)
+            gradient = tf.gradients(model(tf_train_input_coords)[0], 
+                    tf_train_input_coords, 
+                    unconnected_gradients=tf.UnconnectedGradients.ZERO)
+            #print(model(tf_train_input_coords)[0])
+            with tf.Session() as sess: #to get tensor to numpy
+                sess.run(tf.global_variables_initializer())
+                result_output_scaled = sess.run(gradient[0][0])
+                print('grad\n', result_output_scaled * -1) #-tive grad
+                variance, translations, rotations = Network.check_invariance(
+                        train_input_coords[i], result_output_scaled)
+                print('invariance\n', variance, translations, rotations)
+            '''
+
+
+        sys.stdout.flush()
+
+        get_stats = True
+        if get_stats:
+
+            train_output_E_postscale = train_output_E_postscale
+            test_output_E_postscale = test_output_E_postscale
+            train_forces = train_forces
+            test_forces = test_forces
+
+            prediction = model.predict(train_input_coords)
+            train_prediction1 = prediction[0].flatten()
+            train_prediction2 = prediction[1].flatten()
+            train_prediction3 = prediction[3].flatten()
+            train_prediction4 = prediction[2].flatten()
+
+
+            train_mae, train_rms, train_msd = Binner.get_error(
+                    train_output_E_postscale.flatten(), 
+                    train_prediction1.flatten())
+            print('\nE Train MAE: {} \nTrain RMS: {} \nTrain MSD: {}'.format(
+                    train_mae, train_rms, train_msd))
+
+
+            prediction = model.predict(test_input_coords)
+            test_prediction1 = prediction[0].flatten()
+            test_prediction2 = prediction[1].flatten()
+            test_prediction3 = prediction[3].flatten()
+            test_prediction4 = prediction[2].flatten()
+
+            test_mae, test_rms, test_msd = Binner.get_error(
+                    test_output_E_postscale.flatten(), 
+                    test_prediction1.flatten())
+            print('\nE Test MAE: {} \nTest RMS: {} \nTest MSD: {}'.format(
+                    test_mae, test_rms, test_msd))
+            train_bin_edges, train_hist = Binner.get_scurve(
+                    train_output_E_postscale.flatten(), 
+                    train_prediction1.flatten(), 
+                    'train-hist1.txt')
+            test_bin_edges, test_hist = Binner.get_scurve(
+                    test_output_E_postscale.flatten(), #actual
+                    test_prediction1.flatten(), #prediction
+                    'test-hist1.txt')
+            Plotter.plot_2d([train_bin_edges, test_bin_edges], 
+                    [train_hist, test_hist], ['train', 'test'], 
+                    'Error', '% of points below error', 's-curves1.png')
+            sys.stdout.flush()
+
+            train_mae, train_rms, train_msd = Binner.get_error(
+                    train_forces.flatten(), 
+                    train_prediction2.flatten())
+            print('\n{} grad forces Train MAE: {} \nTrain RMS: {} '\
+                    '\nTrain MSD: {}'.format(
+                    len(train_forces), train_mae, train_rms, train_msd))
+            test_mae, test_rms, test_msd = Binner.get_error(
+                    test_forces.flatten(), 
+                    test_prediction2.flatten())
+            print('\n{} grad forces Test MAE: {} \nTest RMS: {} '\
+                    '\nTest MSD: {}'.format(
+                    len(test_forces), test_mae, test_rms, test_msd))
+            train_bin_edges, train_hist = Binner.get_scurve(
+                    train_forces.flatten(), 
+                    train_prediction2.flatten(), 
+                    'train-hist3.txt')
+            test_bin_edges, test_hist = Binner.get_scurve(
+                    test_forces.flatten(), #actual
+                    test_prediction2.flatten(), #prediction
+                    'test-hist3.txt')
+            Plotter.plot_2d([train_bin_edges, test_bin_edges], 
+                    [train_hist, test_hist], ['train', 'test'], 
+                    'Error', '% of points below error', 's-curves3.png')
+            sys.stdout.flush()
+
+            train_mae, train_rms, train_msd = Binner.get_error(
+                    train_forces.flatten(), 
+                    train_prediction3.flatten())
+            print('\n{} recomp forces Train MAE: {} \nTrain RMS: {} '\
+                    '\nTrain MSD: {}'.format(
+                    len(train_forces), train_mae, train_rms, train_msd))
+            test_mae, test_rms, test_msd = Binner.get_error(
+                    test_forces.flatten(), 
+                    test_prediction3.flatten())
+            print('\n{} recomp forces Test MAE: {} \nTest RMS: {} '\
+                    '\nTest MSD: {}'.format(
+                    len(test_forces), test_mae, test_rms, test_msd))
+            train_bin_edges, train_hist = Binner.get_scurve(
+                    train_forces.flatten(), 
+                    train_prediction3.flatten(), 
+                    'train-hist4.txt')
+            test_bin_edges, test_hist = Binner.get_scurve(
+                    test_forces.flatten(), #actual
+                    test_prediction3.flatten(), #prediction
+                    'test-hist4.txt')
+            Plotter.plot_2d([train_bin_edges, test_bin_edges], 
+                    [train_hist, test_hist], ['train', 'test'], 
+                    'Error', '% of points below error', 's-curves4.png')
+            sys.stdout.flush()
+
+            train_mae, train_rms, train_msd = Binner.get_error(
+                    train_output_matFE.flatten(), 
+                    train_prediction4.flatten())
+            print('\n{} mat_(F)E Train MAE: {} \nTrain RMS: {} '\
+                    '\nTrain MSD: {}'.format(
+                    len(train_output_matFE), train_mae, train_rms, train_msd))
+            test_mae, test_rms, test_msd = Binner.get_error(
+                    test_output_matFE.flatten(), 
+                    test_prediction4.flatten())
+            print('\n{} mat_(F)E Test MAE: {} \nTest RMS: {} '\
+                    '\nTest MSD: {}'.format(
+                    len(test_output_matFE), test_mae, test_rms, test_msd))
+            train_bin_edges, train_hist = Binner.get_scurve(
+                    train_output_matFE.flatten(), 
+                    train_prediction4.flatten(), 
+                    'train-hist2.txt')
+            test_bin_edges, test_hist = Binner.get_scurve(
+                    test_output_matFE.flatten(), #actual
+                    test_prediction4.flatten(), #prediction
+                    'test-hist2.txt')
+            Plotter.plot_2d([train_bin_edges, test_bin_edges], 
+                    [train_hist, test_hist], ['train', 'test'], 
+                    'Error', '% of points below error', 's-curves2.png')
+            sys.stdout.flush()
+
+
+            print('Predict all data')
+            prediction = model.predict(input_coords)
+            prediction_E = prediction[0].flatten()
+            prediction_F = prediction[1].flatten()
+            prediction_recompF = prediction[3].flatten()
+            prediction_matFE = prediction[2] #- prescale1[5]
+            Writer.write_csv([output_E_postscale, prediction_E], 
+                    'E', 'actual_E,prediction_E')
+            atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) for z, n in 
+                    zip(molecule.atoms, range(1,len(molecule.atoms)+1))]
+            atom_pairs = []
+            for i in range(len(molecule.atoms)):
+                for j in range(i):
+                    atom_pairs.append('{}_{}'.format(atom_names[i], 
+                        atom_names[j]))
+            input_header = ['input_' + s for s in atom_pairs]
+            input_header = ','.join(input_header)
+            output_header = ['output_' + s for s in atom_pairs]
+            output_header = ','.join(output_header)
+            prediction_header = ['prediction_' + s for s in atom_pairs]
+            prediction_header = ','.join(prediction_header)
+            header = input_header + ',' + output_header + ',' + \
+                    prediction_header
+            #header = 'input,output,prediction'
+            Writer.write_csv([input_NRF, output_matFE, 
+                    prediction_matFE], 'inp_out_pred', header)
+            sys.stdout.flush()
+
+            mae, rms, msd = Binner.get_error(output_E_postscale.flatten(), 
+                    prediction_E.flatten())
+            print('\n{} E All MAE: {} \nAll RMS: {} '\
+                    '\nAll MSD: {}'.format(len(output_E_postscale), mae, rms, 
+                    msd))
+            bin_edges, hist = Binner.get_scurve(output_E_postscale.flatten(), 
+                    prediction_E.flatten(), 'all-hist1.txt')
+            Plotter.plot_2d([bin_edges], [hist], ['all'], 
+                    'Error', '% of points below error', 
+                    'all-s-curves-E.png')
+
+            mae, rms, msd = Binner.get_error(output_F.flatten(), 
+                    prediction_F.flatten())
+            print('\n{} grad F All MAE: {} \nAll RMS: {} '\
+                    '\nAll MSD: {}'.format(len(output_F), mae, rms, msd))
+            bin_edges, hist = Binner.get_scurve(output_F.flatten(), 
+                    prediction_F.flatten(), 'all-hist3.txt')
+            Plotter.plot_2d([bin_edges], [hist], ['all'], 
+                    'Error', '% of points below error', 
+                    'all-s-curves-F.png')
+
+            mae, rms, msd = Binner.get_error(output_F.flatten(), 
+                    prediction_recompF.flatten())
+            print('\n{} recomp F All MAE: {} \nAll RMS: {} '\
+                    '\nAll MSD: {}'.format(len(output_F), mae, rms, msd))
+            bin_edges, hist = Binner.get_scurve(output_F.flatten(), 
+                    prediction_recompF.flatten(), 'all-hist4.txt')
+            Plotter.plot_2d([bin_edges], [hist], ['all'], 
+                    'Error', '% of points below error', 
+                    'all-s-curves-recompF.png')
+
+            mae, rms, msd = Binner.get_error(output_matFE.flatten(), 
+                    prediction_matFE.flatten())
+            print('\n{} mat_(F)E All MAE: {} \nAll RMS: {} '\
+                    '\nAll MSD: {}'.format(len(output_matFE), mae, rms, msd))
+            bin_edges, hist = Binner.get_scurve(output_matFE.flatten(), 
+                    prediction_matFE.flatten(), 'all-hist2.txt')
+            Plotter.plot_2d([bin_edges], [hist], ['all'], 
+                    'Error', '% of points below error', 
+                    'all-s-curves-matFE.png')
+            sys.stdout.flush()
+
+        #print('Done')
+        #sys.exit()
+        #######################---TEST---##############################
+        #######################---TEST---##############################
+
+        return model
+
+
+    def dummy_get_coord_FE_model(self, molecule, prescale1):
         with_lambda = False
         if with_lambda:
             print('with_lambda')
@@ -428,20 +1198,30 @@ class Network(object):
                     net_layer2)
             eij_layer = EijMatrix(n_atoms, max_FE, name='eij_layer')(
                     [triangle_layer, coords_layer])
+            energy_layer = TotalEnergy(prescale, name='energy_layer')(
+                    eij_layer)
 
-        model = Model(inputs=[coords_layer], outputs=[eij_layer, net_layer2])
+
+        #model = Model(inputs=[coords_layer], outputs=[eij_layer, net_layer2])
+        model = Model(inputs=[coords_layer], outputs=[energy_layer])
         model.compile(#loss=cl,
                 #loss='mse', 
-                #loss={'decomp_layer': 'mse'}, #, 'recompFE_layer': cl},
-                loss={'eij_layer': cl, 'net_layer2': 'mse'},
+                #loss={'eij_layer': cl, 'net_layer2': 'mse'},
+                #loss={'energy_layer': cl, 'net_layer2': 'mse'},
+                loss={'energy_layer': 'mse'},
                 optimizer='adam', 
                 metrics=['mae']) #, 'acc']) #mean abs error, accuracy
         model.summary()
+
+
+
         fit = True
         if fit:
             model.fit(train_input_coords, 
-                    [train_output_FE, train_output_matFE_scaled],
-                    epochs=200000, 
+                    #[train_output_FE, train_output_matFE_scaled],
+                    #[train_output_E, train_output_matFE_scaled],
+                    train_output_E_postscale,
+                    epochs=100, 
                     verbose=2,
                     #callbacks=[es],
                     callbacks=[es,mc],
@@ -458,11 +1238,59 @@ class Network(object):
             '''
             model.load_weights('model/model_weights.h5')
 
-        prediction = model.predict(train_input_coords)
-        #prediction = prediction[:,-1].flatten()
-        train_prediction = prediction[0][:,-1].flatten()
 
-        print('prediction')
+        best_error = model.evaluate(train_input_coords, 
+                #[train_output_FE, train_output_matFE_scaled],
+                train_output_E_postscale,
+                verbose=0)
+        print('model error: ', best_error)
+
+        #last_layer_output = Model(inputs=model.input, 
+                #outputs=model.get_layer('eij_layer').output)
+        #FE = NRF_layer_output.predict(train_input)
+
+        #'''
+        gradients = K.gradients(model.output, model.input)
+        print(gradients)
+        '''
+        with tf.Session() as sess: #to get tensor to numpy
+            sess.run(tf.global_variables_initializer())
+            result_output_scaled = sess.run(gradients)
+            print(result_output_scaled)
+        '''
+
+
+
+        #####get gradient oof network model
+        print('\nget network model gradient')
+        for i in range(1):
+            print(i)
+            np_train_input_coords = np.asarray([train_input_coords[i]], 
+                    np.float32)
+            tf_train_input_coords = tf.convert_to_tensor(np_train_input_coords, 
+                    np.float32)
+            tf_train_input_coords = tf.Variable(tf_train_input_coords)
+            gradient = tf.gradients(model(tf_train_input_coords), 
+                    tf_train_input_coords, 
+                    unconnected_gradients=tf.UnconnectedGradients.ZERO)
+            #X = tf.placeholder(tf.float32, shape=(n_atoms,3))
+            #Y = model([X])
+            #fn = K.function([X], K.gradients(Y, [X]))
+            #print(fn([np.ones((n_atoms,3), dtype=np.float32)]))
+            with tf.Session() as sess: #to get tensor to numpy
+                sess.run(tf.global_variables_initializer())
+                result_output_scaled = sess.run(gradient[0])
+                print(result_output_scaled)
+
+        sys.exit()
+        #'''
+
+        prediction = model.predict(train_input_coords)
+        #train_prediction = prediction[:,-1].flatten()
+        #train_prediction = prediction[0][:,-1].flatten()
+        train_prediction = prediction.flatten()
+
+        print('\nprediction')
         print(train_prediction)
         print('actual E')
         print(train_output_E.flatten())
@@ -476,9 +1304,10 @@ class Network(object):
 
         prediction = model.predict(test_input_coords)
         #prediction = prediction[:,-1].flatten()
-        test_prediction = prediction[0][:,-1].flatten()
+        #test_prediction = prediction[0][:,-1].flatten()
+        test_prediction = prediction.flatten()
 
-        print('prediction')
+        print('\nprediction')
         print(test_prediction)
         print('actual E')
         print(test_output_E.flatten())
@@ -505,9 +1334,7 @@ class Network(object):
                     [train_hist, test_hist], ['train', 'test'], 
                     'Error', '% of points below error', 's-curves.png')
 
-        #last_layer_output = Model(inputs=model.input, 
-                #outputs=model.get_layer('eij_layer').output)
-        #FE = NRF_layer_output.predict(train_input)
+
 
 
     def get_decompE_sum_model(self, molecule, nodes, input, output):
@@ -1629,4 +2456,32 @@ class Network(object):
 
 
         
+    def check_invariance(coords, forces):
+        ''' Ensure that forces in each structure translationally and 
+        rotationally sum to zero (energy is conserved) i.e. translations
+        and rotations are invariant. '''
+        #translations
+        translations = []
+        trans_sum = np.sum(forces,axis=0) #sum columns
+        for x in range(3):
+            x_trans_sum = abs(round(trans_sum[x], 0))
+            translations.append(x_trans_sum)
+        translations = np.array(translations)
+        #rotations
+        cm = np.average(coords, axis=0)
+        i_rot_sum = np.zeros((3))
+        for i in range(len(forces)):
+            r = coords[i] - cm
+            diff = np.cross(r, forces[i])
+            i_rot_sum = np.add(i_rot_sum, diff)
+        rotations = np.round(np.abs(i_rot_sum), 0)
+        #check if invariant
+        variance = False
+        if np.all(rotations != 0):
+            variance = True
+        if np.all(translations != 0):
+            variance = True
+        return variance, translations, rotations
+
+
 

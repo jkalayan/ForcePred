@@ -54,7 +54,7 @@ def run_force_pred(input_files='input_files',
     scale_F_min = 2.4191760310543486e-06
     '''
 
-    '''
+    #'''
     #malonaldehyde, mat_FE 
     scale_NRF = 13088.721638547617 
     scale_NRF_min = 14.486865558162252
@@ -63,7 +63,7 @@ def run_force_pred(input_files='input_files',
     #scale_F_min = 1.0744157206588056e-05 #FE
     scale_F_min = 6.629708034999737e-05
     prescale = [167514.2130896381, 100]
-    '''
+    #'''
 
     '''
     #aspirin 
@@ -73,14 +73,14 @@ def run_force_pred(input_files='input_files',
     scale_F_min = 1.1633573357150429e-06
     '''
 
-    #'''
+    '''
     #aspirin, mat_FE 
     scale_NRF = 12937.753800681738 
     scale_NRF_min = 4.294291997641176
     scale_F = 709.2726636527714
     scale_F_min = 5.839251453920724e-06
     prescale = [406757.5912640221, 213.3895117696644]
-    #'''
+    '''
 
 
     startTime = datetime.now()
@@ -89,9 +89,14 @@ def run_force_pred(input_files='input_files',
     molecule = Molecule() #initiate molecule class
     #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
     #XYZParser(atom_file, coord_files, force_files, energy_files, molecule)
-    NPParser(atom_file, coord_files, force_files, [], molecule)
+    NPParser(atom_file, coord_files, force_files, energy_files, molecule)
+    #NPParser(atom_file, [coord_files[0]], [force_files[0]], 
+            #[energy_files[0]], molecule)
+    #molecule2 = Molecule() #initiate molecule class
+    #NPParser(atom_file, [coord_files[1]], [force_files[1]], 
+            #[energy_files[1]], molecule2)
     pdb_file = 'molecules.pdb'
-    Writer.write_pdb(molecule.coords[0], 'MOL', 1, 
+    Writer.write_pdb(molecule.coords[-1], 'MOL', 1, 
             molecule.atoms, pdb_file, 'w')
     masses = [Converter._ZM[i] for i in molecule.atoms]
     sys.stdout.flush()
@@ -108,7 +113,7 @@ def run_force_pred(input_files='input_files',
 
     print('run MD simulation')
     nsteps = 200_00#0_000 #100ns #25_000_000 #12.5ns 20000 #10ps
-    saved_steps = nsteps#/10#000#000
+    saved_steps = nsteps#/10000#000
     print('nsteps: {} saved_steps: {}'.format(nsteps, saved_steps))
     #model = load_model('../../best_ever_model')
 
@@ -135,12 +140,89 @@ def run_force_pred(input_files='input_files',
         cl = custom_loss1(weights)
         model = load_model('../best_ever_model', 
                 custom_objects={'custom_loss': custom_loss1(weights)})
-    else:
+    #else:
         #model = load_model('../../best_ever_model')
-        model = load_model('best_ever_model')
+        #model = load_model('best_ever_model')
+
     #################################################################
 
+
+    #################################################################
+    ##for internal FE model
+    print('\ninternal FE decomposition')
+    Converter.get_simultaneous_interatomic_energies_forces(molecule, 
+            bias_type='1/r')
+    prescale_energies = True
+    '''
+    forces_rms = np.sqrt(np.mean(molecule.forces.flatten()**2))
+    energies_mean = np.mean(molecule.energies.flatten())
+    energies_max = np.max(np.absolute(molecule.energies))
+    prescale = [0, 1, energies_max, forces_rms]
+    '''
+
+    prescale = [0, 1, 0, 1]
+    split = 100 #500 #200 #100
+    train = round(len(molecule.coords) / split, 3)
+    print('\nget train and test sets, '\
+            'training set is {} points'.format(train))
+    Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
+            split) #get train and test sets
+    train_forces = np.take(molecule.forces, molecule.train, axis=0)
+    train_energies = np.take(molecule.energies, molecule.train, axis=0)
+    print('E ORIG min: {} max: {}'.format(np.min(molecule.energies), 
+            np.max(molecule.energies)))
+    print('train E ORIG min: {} max: {}'.format(np.min(train_energies), 
+            np.max(train_energies)))
+    print('F ORIG min: {} max: {}'.format(np.min(molecule.forces), 
+            np.max(molecule.forces)))
+    print('train F ORIG min: {} max: {}'.format(np.min(train_forces), 
+            np.max(train_forces)))
+
+    if prescale_energies:
+        print('\nprescale energies so that magnitude is comparable to forces')
+        '''
+        forces_rms =np.sqrt(np.mean(molecule.forces.flatten()**2))
+        energies_mean = np.mean(molecule.energies.flatten())
+        max_e = np.max(np.absolute(molecule.energies))
+        max_f = np.max(np.absolute(molecule.forces))
+        print('ORIG min: {} max: {}'.format(np.min(molecule.energies), 
+                np.max(molecule.energies)))
+        prescale[0] = max_e
+        prescale[1] = max_f
+        molecule.energies = np.add(molecule.energies, prescale[0]) * \
+                prescale[1]
+        print('SCALED min: {} max: {}'.format(np.min(molecule.energies), 
+                np.max(molecule.energies)))
+        '''
+
+        min_e = np.min(train_energies)
+        max_e = np.max(train_energies)
+        min_f = np.min(train_forces)
+        max_f = np.max(train_forces)
+
+        molecule.energies = ((max_f - min_f) * (molecule.energies - min_e) / 
+                (max_e - min_e) + min_f)
+
+        prescale[0] = min_e
+        prescale[1] = max_e
+        prescale[2] = min_f
+        prescale[3] = max_f
+
+        print('E SCALED min: {} max: {}'.format(np.min(molecule.energies), 
+                np.max(molecule.energies)))
+
+        print('prescale value:', prescale)
+
+    sys.stdout.flush()
+    network = Network(molecule)
+    model = Network.get_coord_FE_model(network, molecule, prescale)
+    sys.stdout.flush()
+    print(datetime.now() - startTime)
+    #################################################################
+
+
     ##write new files here first
+    open('openmm-coords.txt', 'w').close() #needed to continue sims
     open('openmm-coords.xyz', 'w').close()
     open('openmm-forces.txt', 'w').close()
     open('openmm-velocities.txt', 'w').close()
@@ -148,7 +230,7 @@ def run_force_pred(input_files='input_files',
     open('openmm-f-curl.txt', 'w').close()
     #'''
     #no ramp
-    temperature = 0
+    temperature = 300
     system, simulation, md = OpenMM.run_md(system, simulation, md, force, 
             integrator, temperature, network, model, 
             nsteps, saved_steps, init_positions, init_forces, prescale)
@@ -156,13 +238,15 @@ def run_force_pred(input_files='input_files',
 
     '''
     #ramp temp
-    for temperature in range(300,1001,50):
-        if temperature < 800:
-            nsteps = 5000
-        if temperature >= 800:
-            nsteps = 20000
-        saved_steps = nsteps/10#000#000
-        print('nsteps: {} saved_steps: {}'.format(nsteps, saved_steps))
+    for temperature in range(450,-50,-50):
+        #if temperature < 800:
+            #nsteps = 5000
+        #if temperature >= 800:
+            #nsteps = 20000
+        nsteps = 2000
+        saved_steps = nsteps#/10#000#000
+        print('temp: {} nsteps: {} saved_steps: {}'.format(temperature, 
+                nsteps, saved_steps))
         system, simulation, md = OpenMM.run_md(system, simulation, md, force, 
                 integrator, temperature, network, model, 
                 nsteps, saved_steps, init_positions, init_forces, prescale)

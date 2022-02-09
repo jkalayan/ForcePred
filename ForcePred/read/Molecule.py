@@ -108,6 +108,7 @@ class Molecule(object):
         Z_types = list(set(atoms))
         N_atomTypes = len(Z_types)
         N = np.eye(N_atomTypes)    
+        #print('N', N)
         X = []
         for z in atoms:
             ind = Z_types.index(z)
@@ -115,7 +116,9 @@ class Molecule(object):
         X = np.array(X)
         #print('X', X)
         E = []
+        n = -1
         for row in A:
+            n += 1
             r = np.transpose(np.array([row,]*N_atomTypes))
             #print('r', r)
             h1 = r * X
@@ -129,7 +132,7 @@ class Molecule(object):
                     r2 = np.transpose(np.array([row2,]*N_atomTypes))
                     h2 = r2 * X
                     all_sum += np.sum(h2, axis=0)
-            cross = np.cross(sum1, all_sum.T)
+            cross = np.cross(sum1, all_sum.T) * X[n] #Z_types[n] #amended here
             E.append(cross)
         E = np.array(E)
         #print('E', E)
@@ -226,7 +229,8 @@ class Molecule(object):
         #np.savetxt('train_indices.txt', b)                               
         #print(molecule.train.shape)                                      
         molecule.test = c[(c>0)]                                          
-        #print(molecule.test.shape) 
+        #print(molecule.test.shape)
+
 
     def make_train_test(variable, n_train, n_test):
         '''Split input data into training and test sets. Data is 

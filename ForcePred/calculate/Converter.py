@@ -281,12 +281,19 @@ class Converter(object):
             mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2))
             _E = molecule.energies[s].reshape(1)
             decomp_E = np.matmul(np.linalg.pinv(mat_bias2), _E)
-            #rescale using bias
-            _N2 = -1
-            for i in range(n_atoms):
-                for j in range(i):
-                    _N2 += 1
-                    decomp_E[_N2] *= molecule.mat_bias[s,_N2]
+            #'''
+            if s < 1:
+                print('biased', decomp_E)
+                unbiased_decompE = np.copy(decomp_E)
+                #rescale using bias
+                _N2 = -1
+                for i in range(n_atoms):
+                    for j in range(i):
+                        _N2 += 1
+                        unbiased_decompE[_N2] *= molecule.mat_bias[s,_N2]
+                print('unbiased', unbiased_decompE)
+                print()
+            #'''
             molecule.mat_E[s] = decomp_E
             #for e in molecule.mat_E[s]:
                 #print(e)
@@ -331,7 +338,7 @@ class Converter(object):
                 mat_eij2 = mat_eij[i].reshape(3,_NC2)
                 forces2 = molecule.forces[s,i].reshape(3)
                 decomp_atom_F = np.matmul(np.linalg.pinv(mat_eij2), forces2)
-                recomp_F = np.dot(mat_eij2, decomp_atom_F)
+                #recomp_F = np.dot(mat_eij2, decomp_atom_F)
                 #print('NRF', molecule.atom_NRF[s,i])
                 #print('decompF', decomp_atom_F)
                 #print('F', forces2, recomp_F)
@@ -378,11 +385,12 @@ class Converter(object):
         _NC2 = int(n_atoms * (n_atoms-1)/2)
         n_structures = len(molecule.coords)
         molecule.mat_NRF = np.zeros((n_structures, _NC2))
+        molecule.mat_r = np.zeros((n_structures, _NC2))
         molecule.mat_bias = np.zeros((n_structures, _NC2))
         molecule.mat_FE = np.zeros((n_structures, _NC2))
         molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, _NC2))
         for s in range(n_structures):
-            mat_r = np.zeros((_NC2))
+            #mat_r = np.zeros((_NC2))
             mat_Fvals = np.zeros((n_atoms, 3, _NC2))
             _N = -1
             for i in range(n_atoms):
@@ -392,7 +400,8 @@ class Converter(object):
                     zj = molecule.atoms[j]
                     r = Converter.get_r(molecule.coords[s][i], 
                             molecule.coords[s][j])
-                    mat_r[_N] = r
+                    #mat_r[_N] = r
+                    molecule.mat_r[s,_N] = r
                     molecule.mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
                     bias = molecule.mat_NRF[s,_N]
                     if bias_type != 'NRF':
@@ -401,7 +410,8 @@ class Converter(object):
                     molecule.mat_eij[s,n_atoms*3,_N] = bias
                     for x in range(0, 3):
                         val = ((molecule.coords[s][i][x] - 
-                                molecule.coords[s][j][x]) / mat_r[_N])
+                                molecule.coords[s][j][x]) / 
+                                molecule.mat_r[s,_N])
                         if force_bias:
                             val *= bias
                         mat_Fvals[i,x,_N] = val
@@ -417,22 +427,84 @@ class Converter(object):
             _E = molecule.energies[s].reshape(1)
             #decomp_E = np.matmul(np.linalg.pinv(mat_bias2), _E)
 
+
             mat_FE = np.concatenate((mat_Fvals2, mat_bias2), axis=0)
             _FE = np.concatenate([forces2.flatten(), _E.flatten()])
             decomp_FE = np.matmul(np.linalg.pinv(mat_FE), _FE)
 
-
-            '''
-            #not sure how to rescale using bias
+            #'''
+            #rescale using E bias only
             _N2 = -1
             for i in range(n_atoms):
                 for j in range(i):
                     _N2 += 1
-                    decomp_FE[_N2] *= mat_bias[_N2]
-                    if force_bias:
-                        decomp_FE[_N2] *= mat_bias[_N2]
-            '''
+                    decomp_FE[_N2] *= molecule.mat_bias[s,_N2]
+                    molecule.mat_bias[s,_N2] = 1
+                    #if force_bias:
+                        #decomp_FE[_N2] *= mat_bias[_N2]
+            #'''
+
+
             molecule.mat_FE[s] = decomp_FE
+
+
+    def get_simultaneous_interatomic_energies_forces2(atoms, coords, forces, 
+            energies, bias_type='NRF'):
+        '''Get decomposed energies and forces from the same simultaneous
+        equation'''
+
+        force_bias = False
+
+        n_atoms = len(atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        n_structures = len(coords)
+        #molecule.mat_NRF = np.zeros((n_structures, _NC2))
+        mat_r = np.zeros((n_structures, _NC2))
+        mat_bias = np.zeros((n_structures, _NC2))
+        mat_FE = np.zeros((n_structures, _NC2))
+        #mat_eij = np.zeros((n_structures, n_atoms*3+1, _NC2))
+        for s in range(n_structures):
+            mat_r = np.zeros((_NC2))
+            mat_Fvals = np.zeros((n_atoms, 3, _NC2))
+            _N = -1
+            for i in range(n_atoms):
+                zi = atoms[i]
+                for j in range(i):
+                    _N += 1
+                    zj = atoms[j]
+                    r = Converter.get_r(coords[s][i], coords[s][j])
+                    #mat_r[_N] = r
+                    mat_r[_N] = r
+                    #mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
+                    #bias = mat_NRF[s,_N]
+                    #if bias_type != 'NRF':
+                    bias = Converter.get_bias(zi, zj, r, bias_type)
+                    mat_bias[s,_N] = bias
+                    #mat_eij[s,n_atoms*3,_N] = bias
+                    for x in range(0, 3):
+                        val = ((coords[s][i][x] - coords[s][j][x]) / 
+                                mat_r[_N])
+                        if force_bias:
+                            val *= bias
+                        mat_Fvals[i,x,_N] = val
+                        mat_Fvals[j,x,_N] = -val
+                        #mat_eij[s,i*3+x,_N] = val
+                        #mat_eij[s,j*3+x,_N] = -val
+
+            mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2)
+            forces2 = forces[s].reshape(n_atoms*3)
+            #decomp_F = np.matmul(np.linalg.pinv(mat_Fvals2), forces2)
+
+            mat_bias2 = mat_bias[s].reshape((1,_NC2))
+            _E = energies[s].reshape(1)
+            #decomp_E = np.matmul(np.linalg.pinv(mat_bias2), _E)
+
+            _mat_FE = np.concatenate((mat_Fvals2, mat_bias2), axis=0)
+            _FE = np.concatenate([forces2.flatten(), _E.flatten()])
+            decomp_FE = np.matmul(np.linalg.pinv(_mat_FE), _FE)
+
+            mat_FE[s] = decomp_FE
+        return mat_FE
 
 
     def get_recomposed_FE(all_coords, all_prediction, atoms, n_atoms, _NC2, 
@@ -458,7 +530,7 @@ class Converter(object):
                     zj = atoms[j]
                     r = Converter.get_r(coords[i], coords[j])
                     bias = Converter.get_bias(zi, zj, r, bias_type)
-                    bias_ij[i,j] = bias
+                    bias_ij[i,j] = 1 #bias # !!! HARD-CODED!!
                     rij[:,i,j] = (coords[i,:] - coords[j,:])
                     rij[:,j,i] = -rij[:,i,j]
                     eij[:,i,j] = rij[:,i,j] / np.reshape(
@@ -558,6 +630,8 @@ class Converter(object):
             bias = 1 / r ** 2
         if bias_type == 'r':
             bias = r
+        if bias_type == 'r2':
+            bias = r ** 2
         if bias_type == 'r/qq':
             bias = r / zA * zB
         if bias_type == 'NRF':

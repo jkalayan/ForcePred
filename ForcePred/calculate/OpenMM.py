@@ -62,7 +62,7 @@ class OpenMM(object):
         ## setup simulation conditions
         ts = (0.5*femtoseconds).in_units_of(picoseconds) #1 ps == 1e3 fs
         coupling = 1 #50 #2 and 100K, 50 and 300K 
-        temperature = 300 #500 #300
+        temperature = 300 #300 #500 #300
         print('temperature {}K coupling {} ps^-1'.format(temperature, 
             coupling))
 
@@ -120,7 +120,7 @@ class OpenMM(object):
             simulation.context.setPositions(inpcrd.positions)
         #simulation.minimizeEnergy()
         #simulation.reporters.append(PDBReporter('openmm.pdb', 1))
-        simulation.reporters.append(StateDataReporter('openmm.csv', 1, #1000, 
+        simulation.reporters.append(StateDataReporter('openmm.csv', 1,
                 #10, #
                 step=True, potentialEnergy=True, kineticEnergy=True, 
                 temperature=True))
@@ -160,7 +160,7 @@ class OpenMM(object):
 
 
         for i in range(nsteps):
-            #f1 = open('openmm-coords.txt', 'a')          
+            f1 = open('openmm-coords.txt', 'a')          
             f2 = open('openmm-forces.txt', 'a') 
             f3 = open('openmm-velocities.txt', 'a') 
             f4 = open('openmm-delta_energies.txt', 'a')
@@ -169,7 +169,7 @@ class OpenMM(object):
             #print(i)
             time = simulation.context.getState().getTime().in_units_of(
                 femtoseconds)
-            time = int(time/femtoseconds * 2) #fs * 2
+            time = int(time/femtoseconds)# * 2) #fs * 2
             #print(time)
             system, simulation, force, curl, positions = OpenMM.get_forces(
                     i, system, simulation, 
@@ -188,7 +188,7 @@ class OpenMM(object):
             if i%(nsteps/saved_steps) == 0:
                 Writer.write_xyz([positions/angstrom], md.atoms, 
                         'openmm-coords.xyz', 'a', time)
-                #np.savetxt(f1, positions)
+                np.savetxt(f1, positions)
                 np.savetxt(f2, forces)
                 np.savetxt(f3, velocities)
                 f4.write('{}\n'.format(dE))
@@ -200,7 +200,7 @@ class OpenMM(object):
             simulation.step(1)
             sys.stdout.flush()
 
-            #f1.close()
+            f1.close()
             f2.close()
             f3.close()
             f4.close()
@@ -236,8 +236,10 @@ class OpenMM(object):
 
             ##predict forces here
             if from_FE:
-                pred_forces, curl = OpenMM.predict_force_from_FE(
-                        positions/angstrom, network, model, prescale)
+                pred_forces, curl = OpenMM.predict_force_internal_FE(
+                        positions/angstrom, model)
+                #pred_forces, curl = OpenMM.predict_force_from_FE(
+                        #positions/angstrom, network, model, prescale)
                 #pred_forces2 = OpenMM.predict_force(positions, 
                         #network, model)
                 #print('\nA', pred_forces, curl)
@@ -314,6 +316,11 @@ class OpenMM(object):
                 network.scale_NRF, network.scale_NRF_min, 
                 network.scale_F, model, dr, bias_type, molecule, prescale)
         return scaled_F, curl
+
+    def predict_force_internal_FE(positions, model):
+        prediction = model.predict(positions.reshape(1,-1,3))
+        forces = prediction[1]
+        return forces, None
 
     def translate_coords(init_coords, coords, atoms):
         n_atoms = len(atoms)
