@@ -89,19 +89,22 @@ def run_force_pred(input_files='input_files',
     molecule = Molecule() #initiate molecule class
     #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
     #XYZParser(atom_file, coord_files, force_files, energy_files, molecule)
-    NPParser(atom_file, coord_files, force_files, energy_files, molecule)
+    #NPParser(atom_file, coord_files, force_files, energy_files, molecule)
+    NPParser(atom_file, coord_files, force_files, [], molecule)
     #NPParser(atom_file, [coord_files[0]], [force_files[0]], 
             #[energy_files[0]], molecule)
     #molecule2 = Molecule() #initiate molecule class
     #NPParser(atom_file, [coord_files[1]], [force_files[1]], 
             #[energy_files[1]], molecule2)
     pdb_file = 'molecules.pdb'
-    Writer.write_pdb(molecule.coords[-1], 'MOL', 1, 
+    Writer.write_pdb(molecule.coords[0], 'MOL', 1, 
             molecule.atoms, pdb_file, 'w')
     masses = [Converter._ZM[i] for i in molecule.atoms]
     sys.stdout.flush()
 
     print('get network')
+    #ismaeel's aspirin model
+    #scale_NRF = 13036.551114036025 
     network = Network.get_network(molecule, scale_NRF, scale_NRF_min, 
             scale_F, scale_F_min)
     sys.stdout.flush()
@@ -112,8 +115,8 @@ def run_force_pred(input_files='input_files',
     sys.stdout.flush()
 
     print('run MD simulation')
-    nsteps = 200_00#0_000 #100ns #25_000_000 #12.5ns 20000 #10ps
-    saved_steps = nsteps#/10000#000
+    nsteps = 200_000_000 #100ns #25_000_000 #12.5ns 20000 #10ps
+    saved_steps = nsteps/10000#000#2
     print('nsteps: {} saved_steps: {}'.format(nsteps, saved_steps))
     #model = load_model('../../best_ever_model')
 
@@ -124,77 +127,37 @@ def run_force_pred(input_files='input_files',
     md.forces = []
     md.energies = []
 
-    #################################################################
-    ###for sum energy model with custom loss
-    n_atoms = len(molecule.atoms)
-    _NC2 = int(n_atoms * (n_atoms-1)/2)
-    c_loss = False
-    if c_loss:
-        def custom_loss1(weights):
-            def custom_loss(y_true, y_pred):
-                return K.mean(K.abs(y_true - y_pred) * weights)
-            return custom_loss
-
-        weights = np.zeros((_NC2+1)) #np.ones((_NC2+1))
-        weights[-1] = 1 #sumE_weight
-        cl = custom_loss1(weights)
-        model = load_model('../best_ever_model', 
-                custom_objects={'custom_loss': custom_loss1(weights)})
-    #else:
-        #model = load_model('../../best_ever_model')
-        #model = load_model('best_ever_model')
-
-    #################################################################
 
 
-    #################################################################
-    ##for internal FE model
-    print('\ninternal FE decomposition')
-    Converter.get_simultaneous_interatomic_energies_forces(molecule, 
-            bias_type='1/r')
-    prescale_energies = True
-    '''
-    forces_rms = np.sqrt(np.mean(molecule.forces.flatten()**2))
-    energies_mean = np.mean(molecule.energies.flatten())
-    energies_max = np.max(np.absolute(molecule.energies))
-    prescale = [0, 1, energies_max, forces_rms]
-    '''
+    prescale_energies = False
 
-    prescale = [0, 1, 0, 1]
-    split = 100 #500 #200 #100
-    train = round(len(molecule.coords) / split, 3)
-    print('\nget train and test sets, '\
-            'training set is {} points'.format(train))
-    Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
-            split) #get train and test sets
-    train_forces = np.take(molecule.forces, molecule.train, axis=0)
-    train_energies = np.take(molecule.energies, molecule.train, axis=0)
-    print('E ORIG min: {} max: {}'.format(np.min(molecule.energies), 
-            np.max(molecule.energies)))
-    print('train E ORIG min: {} max: {}'.format(np.min(train_energies), 
-            np.max(train_energies)))
-    print('F ORIG min: {} max: {}'.format(np.min(molecule.forces), 
-            np.max(molecule.forces)))
-    print('train F ORIG min: {} max: {}'.format(np.min(train_forces), 
-            np.max(train_forces)))
+    #find max NRF
+    Converter.get_all_NRFs(molecule)
+    print('max NRF', np.max(np.abs(molecule.mat_NRF)))
+    print('max F', np.max(np.abs(molecule.forces)))
 
     if prescale_energies:
-        print('\nprescale energies so that magnitude is comparable to forces')
-        '''
-        forces_rms =np.sqrt(np.mean(molecule.forces.flatten()**2))
-        energies_mean = np.mean(molecule.energies.flatten())
-        max_e = np.max(np.absolute(molecule.energies))
-        max_f = np.max(np.absolute(molecule.forces))
-        print('ORIG min: {} max: {}'.format(np.min(molecule.energies), 
-                np.max(molecule.energies)))
-        prescale[0] = max_e
-        prescale[1] = max_f
-        molecule.energies = np.add(molecule.energies, prescale[0]) * \
-                prescale[1]
-        print('SCALED min: {} max: {}'.format(np.min(molecule.energies), 
-                np.max(molecule.energies)))
-        '''
 
+        prescale = [0, 1, 0, 1]
+        split = 100 #500 #200 #100
+        train = round(len(molecule.coords) / split, 3)
+        print('\nget train and test sets, '\
+                'training set is {} points'.format(train))
+        Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
+                split) #get train and test sets
+        train_forces = np.take(molecule.forces, molecule.train, axis=0)
+        train_energies = np.take(molecule.energies, molecule.train, axis=0)
+        print('E ORIG min: {} max: {}'.format(np.min(molecule.energies), 
+                np.max(molecule.energies)))
+        print('train E ORIG min: {} max: {}'.format(np.min(train_energies), 
+                np.max(train_energies)))
+        print('F ORIG min: {} max: {}'.format(np.min(molecule.forces), 
+                np.max(molecule.forces)))
+        print('train F ORIG min: {} max: {}'.format(np.min(train_forces), 
+                np.max(train_forces)))
+
+
+        print('\nprescale energies so that magnitude is comparable to forces')
         min_e = np.min(train_energies)
         max_e = np.max(train_energies)
         min_f = np.min(train_forces)
@@ -212,10 +175,111 @@ def run_force_pred(input_files='input_files',
                 np.max(molecule.energies)))
 
         print('prescale value:', prescale)
+    sys.stdout.flush()
+
+
+    #################################################################
+    ##for internal FE model
+    print('\ninternal FE decomposition')
+    #Converter.get_simultaneous_interatomic_energies_forces(molecule, 
+            #bias_type='1/r')
+    bias_type='1/r'
+    get_decompFE = False
+    if get_decompFE:
+
+        print('\nget decomposed forces and energies simultaneously')
+
+        #for some reason, using r as the bias does not give back recomp 
+        #values, no idea why!
+        Converter.get_simultaneous_interatomic_energies_forces(molecule, 
+                bias_type)
+
+        '''
+        #save to file for Neil
+        kj2kcal = 1/4.184
+        au2kcalmola = Converter.Eh2kcalmol / Converter.au2Ang
+        print(molecule.forces[-1])
+        np.savetxt('matrix_FE.dat', (molecule.mat_FE[-1]/kj2kcal).reshape(-1,_NC2))
+        np.savetxt('F.dat', (molecule.forces[-1]/au2kcalmola).reshape(-1,3))
+        np.savetxt('E.dat', (molecule.energies[-1]/kj2kcal).reshape(-1,1))
+        np.savetxt('matrix_eij.dat', molecule.mat_eij[-1].reshape(-1,_NC2))
+        '''
+        for i in range(1):
+            print('\ni', i)
+            print('\nmat_NRF', molecule.mat_NRF[i])
+            print('\nmat_FE', molecule.mat_FE[i])
+            print('\nsum mat_FE', np.sum(molecule.mat_FE[i]))
+            print('\nget recomposed FE')
+            print('actual')
+            print(molecule.forces[i])
+            print(molecule.energies[i])
+            n_atoms = len(molecule.atoms)
+            _NC2 = int(n_atoms*(n_atoms-1)/2)
+            recompF, recompE = Converter.get_recomposed_FE(
+                    [molecule.coords[i]], 
+                    [molecule.mat_FE[i] / molecule.mat_eij[i][-1]], #add back bias 
+                    molecule.atoms, n_atoms, _NC2, bias_type)
+            print('\nrecomp from FE')
+            print(recompF)
+            print(recompE)
+            print('\nrecomp from FE with dot')
+            recompF = np.dot(molecule.mat_eij[i][:-1], molecule.mat_FE[i] / 
+                    molecule.mat_eij[i][-1]) #add back bias
+            #recompF = np.dot(molecule.mat_eij[i][:-1], molecule.mat_FE[i])
+            recompE = np.dot(molecule.mat_bias[i], molecule.mat_FE[i])
+
+            print(recompF)
+            print(recompE)
+            '''
+            print('\nrecomp from F only')
+            recompF2 = Conservation.get_recomposed_forces(
+                [molecule.coords[i]], [molecule.mat_F[i]], n_atoms, _NC2)
+            print(recompF2)
+            '''
+
+            lower_mask = np.tri(n_atoms, dtype=bool, k=-1) #True False mask
+            #print(lower_mask)
+            out = np.zeros((n_atoms, n_atoms))
+
+            molecule.atomFE = np.zeros((len(molecule.mat_FE), n_atoms))
+            molecule.atomNRF = np.zeros((len(molecule.mat_NRF), n_atoms))
+            for j in range(len(molecule.mat_FE)):
+                out_copy = np.copy(out)
+                out_copy[lower_mask] = molecule.mat_FE[j]
+                ult = out_copy + out_copy.T
+                atomFE = np.sum(ult, axis=0) / 2
+                molecule.atomFE[j] = atomFE
+                if j == 0:
+                    print('upper lower triangle ult atomFE\n', ult)
+                out_copy2 = np.copy(out)
+                out_copy2[lower_mask] = molecule.mat_NRF[j]
+                ult = out_copy2 + out_copy2.T
+                atomNRF = np.sum(ult, axis=0) / 2
+                molecule.atomNRF[j] = atomNRF
+                if j == 0:
+                    print('upper lower triangle ult atomNRF\n', ult)
+            np.savetxt('atomFE.txt', molecule.atomFE)
+            np.savetxt('atomNRF.txt', molecule.atomNRF)
+            print('column sums, molecule.atomFE\n', molecule.atomFE[0])
+            out[lower_mask] = molecule.mat_FE[0]
+            out3 = out + out.T
+            print('\nupper lower triangle out3\n', out3)
+            atomFE = np.sum(out3, axis=0) / 2
+            print('column sums, atomFE', atomFE)
+            print(molecule.atoms)
+            print('sum atomFE', np.sum(atomFE))
+            print('atomNRF', molecule.atomNRF[0])
+
+
+            print(datetime.now() - startTime)
+            sys.stdout.flush()
+
+
 
     sys.stdout.flush()
     network = Network(molecule)
-    model = Network.get_coord_FE_model(network, molecule, prescale)
+    model = load_model('best_ever_model')
+    #model = Network.get_coord_FE_model(network, molecule, prescale)
     sys.stdout.flush()
     print(datetime.now() - startTime)
     #################################################################

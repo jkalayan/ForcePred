@@ -5,13 +5,26 @@ This module is for running a NN with a training set of data.
 '''
 from __future__ import print_function #for tf printing
 import numpy as np
-import keras
-from keras.layers import Input, Dense, Lambda, concatenate, Layer, \
-        initializers, Add, Multiply
-from keras.models import Model, load_model                                   
-from keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
-from keras import backend as K                                              
+#import keras #older version
+from tensorflow import keras #newer version
+from tensorflow.keras.layers import Input, Dense, Lambda, concatenate, \
+        Layer #initializers #, Add, Multiply
+from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, \
+        ReduceLROnPlateau
+from tensorflow.keras import backend as K
 import tensorflow as tf
+
+#print("TensorFlow version:", tf.__version__)
+#print("List of GPUs:", tf.config.list_physical_devices('GPU'))
+
+#NUMCORES=int(os.getenv("NSLOTS",1))
+#print("Using", NUMCORES, "core(s)" )
+#tf.config.threading.set_inter_op_parallelism_threads(NUMCORES) 
+#tf.config.threading.set_intra_op_parallelism_threads(NUMCORES)
+#tf.config.set_soft_device_placement(1)
+
+
 #import tensorflow_addons as tfa
 #import tensorflow_probability as tfp
 from functools import partial
@@ -25,23 +38,22 @@ from ..calculate.Conservation import Conservation
 import sys
 import time
 
-'''
-import tensorflow as tf
-sess = tf.Session()
+start_time = time.time()
 
-from keras import backend as K
-K.set_session(sess)
-'''
+tf.compat.v1.disable_eager_execution()
 
 class CoordsToNRF_test(Layer):
-    def __init__(self, atoms_flat, atoms2, max_NRF, _NC2, name):
+    def __init__(self, atoms_flat, max_NRF, _NC2, **kwargs):
         super(CoordsToNRF_test, self).__init__()
         self.atoms_flat = atoms_flat
-        self.atoms2 = tf.Variable(atoms2)
-        self.max_NRF = tf.Variable(max_NRF)
+        #self.atoms2 = tf.Variable(atoms2)
+        self.max_NRF = max_NRF
         self._NC2 = _NC2
-        self.name = name
-        self.au2kcalmola = tf.Variable(627.5095 * 0.529177)
+        #self.name = name
+        self.au2kcalmola = 627.5095 * 0.529177
+
+    #def build(self, input_shape):
+        #self.kernal = self.add_weight('kernel')
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
@@ -65,14 +77,15 @@ class CoordsToNRF_test(Layer):
                 self.max_NRF) #scaled
         return _NRF
 
+
 class CoordsTo_atomNRF(Layer):
-    def __init__(self, atoms_flat, atoms2, max_atomNRF, _NC2, name):
+    def __init__(self, atoms_flat, atoms2, max_atomNRF, _NC2, **kwargs):
         super(CoordsTo_atomNRF, self).__init__()
-        self.atoms_flat = atoms_flat
+        self.atoms_flat = tf.Variable(atoms_flat)
         self.atoms2 = tf.Variable(atoms2)
         self.max_atomNRF = tf.Variable(max_atomNRF)
-        self._NC2 = _NC2
-        self.name = name
+        self._NC2 = tf.Variable(_NC2)
+        #self.name = name
         self.au2kcalmola = tf.Variable(627.5095 * 0.529177)
 
     def compute_output_shape(self, input_shape):
@@ -97,29 +110,37 @@ class CoordsTo_atomNRF(Layer):
                 shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
         r = diff_flat**0.5
         _NRF = ((self.atoms_flat * self.au2kcalmola) / (r ** 2))
-        triangle_NRF = Triangle(self._NC2, self.name)(_NRF)
+        triangle_NRF = Triangle(self.n_atoms, self.name)(_NRF)
         atomNRF = tf.reduce_sum(triangle_NRF, 1, keepdims=True) / 2
         atomNRF_scaled = atomNRF / self.max_atomNRF
         return atomNRF_scaled
 
 class CoordsTo_angleNRF(Layer):
-    def __init__(self, n_atoms, atoms_flat, atoms2, max_NRF, _NC2, name):
+    def __init__(self, n_atoms, atoms_flat, atoms2, max_NRF, _NC2, **kwargs):
         super(CoordsTo_angleNRF, self).__init__()
-        self.n_atoms = n_atoms
-        self.atoms_flat = atoms_flat
+        self.n_atoms = tf.Variable(n_atoms)
+        self.atoms_flat = tf.Variable(atoms_flat)
         self.atoms2 = tf.Variable(atoms2)
         self.max_NRF = tf.Variable(max_NRF)
-        self._NC2 = _NC2
-        self.name = name
+        self._NC2 = tf.Variable(_NC2)
+        #self.name = name
         self.au2kcalmola = tf.Variable(627.5095 * 0.529177)
+        #self.test = None #tf.Variable(initial_value=tf.zeros((self._NC2)), 
+                #trainable=False)
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
         n_atoms = input_shape[1]
         #return (batch_size, n_atoms, n_atoms)
         return (batch_size, self._NC2)
+        #return (batch_size, 3)
+        #return (batch_size, 1)
 
     def call(self, coords):
+        #test = tf.reshape(coords, shape=(tf.shape(coords)[0], self.n_atoms*3)) * 2
+        test = coords * 2
+
+        '''
         a = tf.expand_dims(coords, 2)
         b = tf.expand_dims(coords, 1)
         diff = a - b
@@ -131,6 +152,11 @@ class CoordsTo_angleNRF(Layer):
         diff_flat = tf.reshape(nonzero_values, 
                 shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
         r = diff_flat**0.5
+
+        _NRF = (((self.atoms_flat * self.au2kcalmola) / (r ** 2)) / 
+                self.max_NRF) #scaled
+        '''
+
 
         '''
         ##get angles for each pair with centre of molecule
@@ -151,6 +177,7 @@ class CoordsTo_angleNRF(Layer):
                 shape=(tf.shape(tri2)[0], -1)) #reshape to _NC2
         '''
 
+        '''
         centre = tf.reduce_sum(coords, axis=1) / self.n_atoms 
         vectors = coords - centre
         unit_mags1 = tf.reduce_sum(vectors**2, axis=-1) ** 0.5 #last axes
@@ -173,15 +200,20 @@ class CoordsTo_angleNRF(Layer):
         angleNRF = ((self.atoms_flat * self.au2kcalmola) / (r ** 2)) * \
                 (cos_theta_flat + 1)
         scaled_angleNRF = angleNRF / (2 * self.max_NRF) + 0.5 #scaled 
-        return scaled_angleNRF
+        '''
+        #return scaled_angleNRF
+        return test #_NRF
 
 
 class ScaleFE(Layer):
-    def __init__(self, _NC2, max_FE, name):
+    def __init__(self, _NC2, max_FE, **kwargs):
         super(ScaleFE, self).__init__()
         self._NC2 = _NC2
         self.max_FE = max_FE
-        self.name = name
+        #self.name = name
+
+    #def build(self, input_shape):
+        #self.kernal = self.add_weight('kernel')
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
@@ -192,12 +224,13 @@ class ScaleFE(Layer):
         decompFE_scaled = (decompFE - 0.5) * (2 * self.max_FE)
         return decompFE_scaled
 
+
 class Scale_atomE(Layer):
-    def __init__(self, n_atoms, max_atomE, name):
+    def __init__(self, n_atoms, max_atomE, **kwargs):
         super(Scale_atomE, self).__init__()
-        self.n_atoms = n_atoms
-        self.max_atomE = max_atomE
-        self.name = name
+        self.n_atoms = tf.Variable(n_atoms)
+        self.max_atomE = tf.Variable(max_atomE)
+        #self.name = name
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
@@ -210,13 +243,13 @@ class Scale_atomE(Layer):
 
 
 class atomE_test(Layer):
-    def __init__(self, n_atoms, _NC2, max_FE, prescale, name):
+    def __init__(self, n_atoms, _NC2, max_FE, prescale, **kwargs):
         super(atomE_test, self).__init__()
-        self.max_FE = max_FE
-        self.n_atoms = n_atoms
-        self._NC2 = _NC2
-        self.prescale = prescale
-        self.name = name
+        self.max_FE = tf.Variable(max_FE)
+        self.n_atoms = tf.Variable(n_atoms)
+        self._NC2 =tf.Variable(_NC2)
+        self.prescale = tf.Variable(prescale)
+        #self.name = name
 
     def compute_output_shape(self, input_shape):
         #batch_size = input_shape[0][0]
@@ -240,13 +273,13 @@ class atomE_test(Layer):
 
 
 class sum_atomE_test(Layer):
-    def __init__(self, n_atoms, _NC2, max_FE, prescale, name):
+    def __init__(self, n_atoms, _NC2, max_FE, prescale, **kwargs):
         super(sum_atomE_test, self).__init__()
-        self.max_FE = max_FE
-        self.n_atoms = n_atoms
-        self._NC2 = _NC2
-        self.prescale = prescale
-        self.name = name
+        self.max_FE = tf.Variable(max_FE)
+        self.n_atoms = tf.Variable(n_atoms)
+        self._NC2 = tf.Variable(_NC2)
+        self.prescale = tf.Variable(prescale)
+        #self.name = name
 
     def compute_output_shape(self, input_shape):
         #batch_size = input_shape[0][0]
@@ -269,13 +302,16 @@ class sum_atomE_test(Layer):
 
 
 class EijMatrix_test(Layer):
-    def __init__(self, n_atoms, _NC2, max_FE, prescale, name):
+    def __init__(self, n_atoms, _NC2, prescale, **kwargs):
         super(EijMatrix_test, self).__init__()
-        self.max_FE = max_FE
+        #self.max_FE = tf.Variable(max_FE, name='3a')
         self.n_atoms = n_atoms
         self._NC2 = _NC2
         self.prescale = prescale
-        self.name = name
+        #self.name = name
+
+    #def build(self, input_shape):
+        #self.kernal = self.add_weight('kernel')
 
     def compute_output_shape(self, input_shape):
         #batch_size = input_shape[0][0]
@@ -286,14 +322,17 @@ class EijMatrix_test(Layer):
         #return (batch_size, self.n_atoms, self.n_atoms, 1)
         #return (batch_size, self.n_atoms, 3)
 
-    def call(self, decompFE_coords):
+    def call(self, coords_decompFE):
     #def call(self, coords):
-        '''decompFE is a sq upper and lower triangle matrix, from coords we 
-        get the eij matrices for Fs and Es.'''
-        decompFE = decompFE_coords[:,:,3:]
-        coords = decompFE_coords[:,:,:3]
+        '''decompFE is flat, so get a sq upper and lower triangle matrix, 
+        from coords we get the eij matrices for Fs and Es.'''
+        #coords = coords_decompFE[:,:,:3]
+        #decompFE = coords_decompFE[:,:,3:]
+        coords, decompFE_flat = coords_decompFE
+        decompFE = Triangle(self.n_atoms)(decompFE_flat)
 
-        '''
+
+        #'''
         a = tf.expand_dims(coords, 2)
         b = tf.expand_dims(coords, 1)
         diff = a - b
@@ -309,28 +348,38 @@ class EijMatrix_test(Layer):
 
         #get energy 1/r_ij eij matrix
         recip_r_flat = 1 / r_flat
-        ones = tf.ones_like(recip_r_flat)
-        #Q3 = Triangle(self._NC2, self.name)(recip_r_flat)
-        Q3 = Triangle(self._NC2, self.name)(ones) #!!!!!
+        #ones = tf.ones_like(recip_r_flat)
+        Q3 = Triangle(self.n_atoms)(recip_r_flat)
+        #Q3 = Triangle(self.n_atoms)(ones) #!!!!!
         eij_E = tf.expand_dims(Q3, 3)
         #dot product of 
         E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
         E = E2/2
+        #'''
+
         '''
         E_atoms = tf.reduce_sum(decompFE, 1) / 2
         E = tf.reduce_sum(E_atoms, 1, keepdims=True)
+        '''
 
         E3 = ((E - self.prescale[2]) / 
                 (self.prescale[3] - self.prescale[2]) * 
                 (self.prescale[1] - self.prescale[0]) + self.prescale[0])
 
+        #gradients = #tf.gradients(E3, coords, 
+                #colocate_gradients_with_ops=True, 
+                #unconnected_gradients='zero'
+                #) * -1
+
+        #gradients = get_grads(coords, E3)
+
         '''
         #### FOR FORCES IF REQUIRED
-        r = Triangle(self._NC2, self.name)(r_flat)
+        r = Triangle(self.n_atoms)(r_flat)
         r2 = tf.expand_dims(r, 3)
         eij_F2 = diff / r2
-        eij_F = tf.where(tf.is_nan(eij_F2), tf.zeros_like(eij_F2), eij_F2) 
-            #remove nans
+        eij_F = tf.where(tf.math.is_nan(eij_F2), tf.zeros_like(eij_F2), 
+                eij_F2) #remove nans
         F = tf.einsum('bijk, bij -> bik', eij_F, decompFE)
         F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
         FE = tf.concat([F_reshaped, E], axis=1)
@@ -338,14 +387,65 @@ class EijMatrix_test(Layer):
 
         return E3
 
-class EijMatrix_test2(Layer):
-    def __init__(self, n_atoms, _NC2, max_FE, prescale, name):
-        super(EijMatrix_test2, self).__init__()
-        self.max_FE = max_FE
+
+class ForForces(Layer):
+    def __init__(self, n_atoms, _NC2, prescale, **kwargs):
+        super(ForForces, self).__init__()
         self.n_atoms = n_atoms
         self._NC2 = _NC2
         self.prescale = prescale
-        self.name = name
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, 1)
+
+    def call(self, coords_decompFE):
+        coords, decompFE_flat = coords_decompFE
+        decompFE = Triangle(self.n_atoms)(decompFE_flat)
+
+        #'''
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
+        #flatten diff2 so that _NC2 values are left
+        tri = tf.linalg.band_part(diff2, -1, 0) #lower
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        diff_flat = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        r_flat = diff_flat**0.5
+
+
+        #get energy 1/r_ij eij matrix
+        recip_r_flat = 1 / r_flat
+        #ones = tf.ones_like(recip_r_flat)
+        Q3 = Triangle(self.n_atoms)(recip_r_flat)
+        #Q3 = Triangle(self.n_atoms)(ones) #!!!!!
+        eij_E = tf.expand_dims(Q3, 3)
+        #dot product of 
+        E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
+        E = E2/2
+        #'''
+
+
+
+        #E_atoms = tf.reduce_sum(decompFE, 1) / 2
+        #E = tf.reduce_sum(E_atoms, 1, keepdims=True)
+        E3 = ((E - self.prescale[2]) / 
+                (self.prescale[3] - self.prescale[2]) * 
+                (self.prescale[1] - self.prescale[0]) + self.prescale[0])
+        return E3
+
+
+class EijMatrix_test2(Layer):
+    def __init__(self, n_atoms, _NC2, **kwargs):
+        super(EijMatrix_test2, self).__init__()
+        #self.max_FE = tf.Variable(max_FE, name='4a')
+        self.n_atoms = n_atoms
+        self._NC2 = _NC2
+        #self.prescale = tf.Variable(prescale, name='4b')
+        #self.name = name
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
@@ -355,12 +455,14 @@ class EijMatrix_test2(Layer):
         #return (batch_size, self.n_atoms, self.n_atoms, 1)
         return (batch_size, self.n_atoms, 3)
 
-    def call(self, decompFE_coords):
+    def call(self, coords_decompFE):
     #def call(self, coords):
         '''decompFE is a sq upper and lower triangle matrix, from coords we 
         get the eij matrices for Fs and Es.'''
-        decompFE = decompFE_coords[:,:,3:]
-        coords = decompFE_coords[:,:,:3]
+        #coords = coords_decompFE[:,:,:3]
+        #decompFE = coords_decompFE[:,:,3:]
+        coords, decompFE_flat = coords_decompFE
+        decompFE = Triangle(self.n_atoms)(decompFE_flat)
 
         a = tf.expand_dims(coords, 2)
         b = tf.expand_dims(coords, 1)
@@ -377,7 +479,7 @@ class EijMatrix_test2(Layer):
         '''
         #get energy 1/r_ij eij matrix
         recip_r_flat = 1 / r_flat
-        Q3 = Triangle(self._NC2, self.name)(recip_r_flat)
+        Q3 = Triangle(self.n_atoms)(recip_r_flat)
         eij_E = tf.expand_dims(Q3, 3)
         #dot product of 
         E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
@@ -390,11 +492,11 @@ class EijMatrix_test2(Layer):
 
         #'''
         #### FOR FORCES IF REQUIRED
-        r = Triangle(self._NC2, self.name)(r_flat)
+        r = Triangle(self.n_atoms)(r_flat)
         r2 = tf.expand_dims(r, 3)
         eij_F2 = diff / r2
-        eij_F = tf.where(tf.is_nan(eij_F2), tf.zeros_like(eij_F2), eij_F2) 
-            #remove nans
+        eij_F = tf.where(tf.math.is_nan(eij_F2), tf.zeros_like(eij_F2), 
+                eij_F2) #remove nans
         F = tf.einsum('bijk, bij -> bik', eij_F, decompFE)
         #F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
         #FE = tf.concat([F_reshaped, E], axis=1)
@@ -403,69 +505,59 @@ class EijMatrix_test2(Layer):
         return F
 
 
-class TotalEnergy_test(Layer):
-    def __init__(self, prescale, n_atoms, _NC2, name):
-        super(TotalEnergy_test, self).__init__()
-        self.prescale = prescale
+
+@tf.function
+def get_grads(x, y):
+    '''this needs to be wrapped in a tf.function to work'''
+    return tf.gradients(y, x, 
+            unconnected_gradients='zero', #colocate_gradients_with_ops=True
+            )[0] * -1
+
+
+class EnergyGradient(Layer):
+    def __init__(self, n_atoms, _NC2, **kwargs):
+        super(EnergyGradient, self).__init__()
         self.n_atoms = n_atoms
         self._NC2 = _NC2
-        self.name = name
+        #self.g = g
+        #self.name = name
+
+    #def build(self, input_shape):
+        #self.kernal = self.add_weight('kernel')
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
-        #return (batch_size, self.n_atoms*3+1)
-        #return (batch_size, self.n_atoms, 3)
-        #return (batch_size, self.n_atoms, self.n_atoms)
+        return (batch_size, self.n_atoms, 3)
         #return (batch_size, self._NC2)
-        return (batch_size, 1)
 
-    def call(self, E):
-        E2 = (E / self.prescale[1]) - self.prescale[0]
-        return E2
-        '''
-        coords = tf.reshape(coords_E[:,:-1], shape=(tf.shape(coords_E)[0], 
-                self.n_atoms, 3))
-        E = coords_E[:,-1]
-        gradients = tf.gradients(E, coords, 
+    def call(self, E_coords):
+        E, coords = E_coords
+        #gradients = get_grads(coords, E)
+        gradients = tf.compat.v1.gradients(E, coords, 
                 colocate_gradients_with_ops=True, 
                 unconnected_gradients='zero')
-        return gradients * -1 #E2
-        '''
+        return gradients[0] * -1
 
 
-class CoordsToNRF(Layer):
-    def __init__(self, atoms2, max_NRF, name):
-        super(CoordsToNRF, self).__init__()
-        self.atoms2 = atoms2
-        self.max_NRF = max_NRF
-        self.name = name
-        self.au2kcalmola = 627.5095 * 0.529177
+        #with tf.GradientTape() as g:
+            #g.watch(coords)
+            #y = model(x)[0]
+            #g.watch(E)
+        #g = tf.GradientTape(persistent=True)
+        #gradients = g.jacobian(E, coords, unconnected_gradients='zero'
+                #)#[0][0] * -1
+        #gradients = g.gradient(E, coords, unconnected_gradients='zero'
+                #) #* -1
+        #return gradients
 
-    def compute_output_shape(self, input_shape):
-        batch_size = input_shape[0]
-        n_atoms = input_shape[1]
-        return (batch_size, n_atoms, n_atoms)
 
-    def call(self, coords):
-        '''From coords shaped (batch,n_atoms,3), get NRFs as the lower and 
-        upper triangles of a sq matrix (batch,n_atoms,n_atoms).'''
-        #distance between all pairs
-        a = tf.expand_dims(coords, 2)
-        b = tf.expand_dims(coords, 1)
-        diff = a - b  
-        r = tf.reduce_sum(diff**2, axis=-1)**0.5
-        #get NRF and scale
-        _NRF = ((self.atoms2 * self.au2kcalmola) / (r ** 2)) / self.max_NRF
-        #remove infs
-        triangle_NRF = tf.where(tf.is_inf(_NRF), tf.zeros_like(_NRF), _NRF) 
-        return triangle_NRF
 
 
 class FlatTriangle(Layer):
-    def __init__(self, _NC2, name):
+    def __init__(self, _NC2, **kwargs):
         super(FlatTriangle, self).__init__()
         self._NC2 = _NC2
-        self.name = name
+        #self.name = name
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
@@ -485,10 +577,10 @@ class FlatTriangle(Layer):
 
 
 class Triangle(Layer):
-    def __init__(self, n_atoms, name):
+    def __init__(self, n_atoms, **kwargs):
         super(Triangle, self).__init__()
         self.n_atoms = n_atoms
-        self.name = name
+        #self.name = name
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
@@ -500,11 +592,11 @@ class Triangle(Layer):
         https://stackoverflow.com/questions/40406733/
                 tensorflow-equivalent-for-this-matlab-code
         '''
-        decompFE = tf.convert_to_tensor(decompFE, dtype=tf.float32)
+        #decompFE = tf.convert_to_tensor(decompFE, dtype=tf.float32)
         #rescale decompFE
         #decompFE = ((decompFE - 0.5) * (2 * self.max_FE))
 
-        decompFE.get_shape().with_rank_at_least(1)
+        #decompFE.get_shape().with_rank_at_least(1)
 
         #put batch dimensions last
         decompFE = tf.transpose(decompFE, tf.concat([[tf.rank(decompFE)-1],
@@ -517,18 +609,32 @@ class Triangle(Layer):
         #compute indices for whole matrix and upper diagonal
         index_matrix = tf.reshape(tf.range(matrix_size**2), 
                 [matrix_size, matrix_size])
+
+
+        tri1 = tf.linalg.band_part(index_matrix, -1, 0) #lower
+        diag = tf.linalg.band_part(index_matrix, 0, 0) #diag of ones
+        tri2 = tri1 - diag #get lower without diag of ones
+        nonzero_indices = tf.where(tf.not_equal(tri2, tf.zeros_like(tri2)))
+        nonzero_values = tf.gather_nd(tri2, nonzero_indices)
+        reshaped_nonzero_values = tf.reshape(nonzero_values, [-1])
+
+        '''
         diagonal_indices = (matrix_size * tf.range(matrix_size)
                 + tf.range(matrix_size))
         upper_triangular_indices, _ = tf.unique(tf.reshape(
-                tf.matrix_band_part(index_matrix, -1, 0)
-                - tf.diag(diagonal_indices), [-1]))
+                #tf.matrix_band_part(index_matrix, -1, 0) #v1
+                tf.linalg.band_part(index_matrix, -1, 0)
+                - tf.linalg.diag(diagonal_indices), [-1]))
+        '''
         batch_dimensions = tf.shape(decompFE)[1:]
         return_shape_transposed = tf.concat([[matrix_size, matrix_size],
                 batch_dimensions], axis=0)
         #fill everything else with zeros; later entries get priority
         #in dynamic_stitch
         result_transposed = tf.reshape(tf.dynamic_stitch([index_matrix,
-                upper_triangular_indices[1:]],
+                #upper_triangular_indices[1:]
+                reshaped_nonzero_values
+                ],
                 [tf.zeros(return_shape_transposed, dtype=decompFE.dtype),
                 decompFE]), return_shape_transposed)
         #Transpose the batch dimensions to be first again
@@ -539,63 +645,6 @@ class Triangle(Layer):
         Q3 = Q + Q2
 
         return Q3
-
-
-class EijMatrix(Layer):
-    def __init__(self, n_atoms, max_FE, name):
-        super(EijMatrix, self).__init__()
-        self.max_FE = max_FE
-        self.n_atoms = n_atoms
-        self.name = name
-
-    def compute_output_shape(self, input_shape):
-        batch_size = input_shape[0][0]
-        return (batch_size, self.n_atoms*3+1)
-
-    def call(self, decompFE_coords):
-        '''decompFE is a sq upper and lower triangle matrix, from coords we 
-        get the eij matrices for Fs and Es.'''
-        decompFE = decompFE_coords[0]
-        coords = decompFE_coords[1] 
-        #rescale decompFE
-        decompFE = ((tf.convert_to_tensor(decompFE, dtype=tf.float32) - 0.5)
-                * (2 * self.max_FE))
-        #get force (r_xi - r_xj / |r_ij|) eij matrix
-        a = tf.expand_dims(coords, 2)
-        b = tf.expand_dims(coords, 1)
-        diff = a - b
-        r = tf.reduce_sum(diff**2, axis=-1)**0.5
-        r2 = tf.expand_dims(r, 3)
-        eij = diff / r2
-        eij_F = tf.where(tf.is_nan(eij), tf.zeros_like(eij), 
-                eij) #remove nans
-        #get energy 1/r_ij eij matrix
-        recip_r = 1 / r
-        recip_r2 = tf.where(tf.is_inf(recip_r), tf.zeros_like(recip_r), 
-                recip_r) #remove infs
-        eij_E = tf.expand_dims(recip_r2, 3)
-        #dot product of 
-        F = tf.einsum('bijk, bij -> bik', eij_F, decompFE)
-        E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
-        E = E2/2
-        F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
-        FE = tf.concat([F_reshaped, E], axis=1)
-        return FE
-
-
-class TotalEnergy(Layer):
-    def __init__(self, prescale, name):
-        super(TotalEnergy, self).__init__()
-        self.prescale = prescale
-        self.name = name
-
-    def compute_output_shape(self, input_shape):
-        batch_size = input_shape[0]
-        return (batch_size, 1)
-
-    def call(self, FE):
-        E = (FE[:,-1] / self.prescale[1]) - self.prescale[0]
-        return E
 
 
 class Network(object):
@@ -625,127 +674,6 @@ class Network(object):
         return network
 
 
-    def print_tensor(a):
-        with tf.Session() as sess: #to get tensor to numpy
-            sess.run(tf.global_variables_initializer())
-            x = sess.run(a)
-            print(x)
-
-
-    def return_tensor(a):
-        with tf.Session() as sess: #to get tensor to numpy
-            sess.run(tf.global_variables_initializer())
-            x = sess.run(a)
-        return x
-
-
-    def get_FE_eij_matrix(decompFE, coords, max_FE):
-        '''decompFE is a sq upper and lower triangle matrix, from coords we 
-        get the eij matrices for Fs and Es.'''
-        #rescale decompFE
-        decompFE = ((tf.convert_to_tensor(decompFE, dtype=tf.float32) - 0.5)
-                * (2 * max_FE))
-        #get force (r_xi - r_xj / |r_ij|) eij matrix
-        a = tf.expand_dims(coords, 2)
-        b = tf.expand_dims(coords, 1)
-        diff = a - b
-        r = tf.reduce_sum(diff**2, axis=-1)**0.5
-        r2 = tf.expand_dims(r, 3)
-        eij = diff / r2
-        eij_F = tf.where(tf.is_nan(eij), tf.zeros_like(eij), 
-                eij) #remove nans
-        #get energy 1/r_ij eij matrix
-        recip_r = 1 / r
-        recip_r2 = tf.where(tf.is_inf(recip_r), tf.zeros_like(recip_r), 
-                recip_r) #remove infs
-        eij_E = tf.expand_dims(recip_r2, 3)
-        #dot product of 
-        F = tf.einsum('bijk, bij -> bik', eij_F, decompFE)
-        E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
-        E = E2/2
-        F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
-        FE = tf.concat([F_reshaped, E], axis=1)
-        return FE
-
-
-    def get_triangle(decompFE):
-        '''Convert flat NC2 to lower and upper triangle sq matrix, this
-        is used in get_FE_eij_matrix to get recomposedFE
-        https://stackoverflow.com/questions/40406733/
-                tensorflow-equivalent-for-this-matlab-code
-        '''
-        decompFE = tf.convert_to_tensor(decompFE, dtype=tf.float32)
-        decompFE.get_shape().with_rank_at_least(1)
-
-        #put batch dimensions last
-        decompFE = tf.transpose(decompFE, tf.concat([[tf.rank(decompFE)-1],
-                tf.range(tf.rank(decompFE)-1)], axis=0))
-        input_shape = tf.shape(decompFE)[0]
-        #compute size of matrix that would have this upper triangle
-        matrix_size = (1 + tf.cast(tf.sqrt(tf.cast(input_shape*8+1, 
-                tf.float32)), tf.int32)) // 2
-        matrix_size = tf.identity(matrix_size)
-        #compute indices for whole matrix and upper diagonal
-        index_matrix = tf.reshape(tf.range(matrix_size**2), 
-                [matrix_size, matrix_size])
-        diagonal_indices = (matrix_size * tf.range(matrix_size)
-                + tf.range(matrix_size))
-        upper_triangular_indices, _ = tf.unique(tf.reshape(
-                tf.matrix_band_part(index_matrix, -1, 0)
-                - tf.diag(diagonal_indices), [-1]))
-        batch_dimensions = tf.shape(decompFE)[1:]
-        return_shape_transposed = tf.concat([[matrix_size, matrix_size],
-                batch_dimensions], axis=0)
-        #fill everything else with zeros; later entries get priority
-        #in dynamic_stitch
-        result_transposed = tf.reshape(tf.dynamic_stitch([index_matrix,
-                upper_triangular_indices[1:]],
-                [tf.zeros(return_shape_transposed, dtype=decompFE.dtype),
-                decompFE]), return_shape_transposed)
-        #Transpose the batch dimensions to be first again
-        Q = tf.transpose(result_transposed, tf.concat(
-                [tf.range(2, tf.rank(decompFE)+1), [0,1]], axis=0))
-        Q2 = tf.transpose(result_transposed, tf.concat(
-                [tf.range(2, tf.rank(decompFE)+1), [1,0]], axis=0))
-        Q3 = Q + Q2
-        return Q3
-
-
-    def flatten_triangle(tri):
-        '''Take the lower triangle of the sq matrix, remove zeros and reshape
-        https://stackoverflow.com/questions/42032517/
-                how-to-omit-zeros-in-a-4-d-tensor-in-tensorflow
-        '''
-        tri = tf.linalg.band_part(tri, -1, 0)
-        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
-        nonzero_values = tf.gather_nd(tri, nonzero_indices)
-        reshaped_nonzero_values = tf.reshape(nonzero_values, 
-                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
-        return reshaped_nonzero_values
-
-
-    def get_NRF_from_coords(coords, atoms2, max_NRF):
-        '''From coords shaped (batch,n_atoms,3), get NRFs as the lower and 
-        upper triangles of a sq matrix (batch,n_atoms,n_atoms).'''
-        #distance between all pairs
-        a = tf.expand_dims(coords, 2)
-        b = tf.expand_dims(coords, 1)
-        diff = a - b
-        r = tf.reduce_sum(diff**2, axis=-1)**0.5
-        '''
-        #multiply all atom zs by with each other
-        atoms2 = tf.tensordot(tf.expand_dims(atoms, 0), 
-                tf.expand_dims(atoms, 0), axes=[[0],[0]])
-        '''
-        #get NRF and scale
-        _NRF = ((atoms2 * Converter.au2kcalmola) / (r ** 2)) / max_NRF
-        #lower_triangle = tf.linalg.band_part(_NRF, -1, 0)
-        #remove infs
-        triangle_NRF = tf.where(tf.is_inf(_NRF), tf.zeros_like(_NRF), _NRF) 
-
-        return triangle_NRF
-
-
     def get_coord_FE_model(self, molecule, prescale1):
         '''Input coordinates and z_types into model to get NRFS which then 
         are used to predict decompFE, which are then recomposed to give
@@ -768,586 +696,696 @@ class Network(object):
                 atoms_flat.append(ij)
         atoms_flat = tf.convert_to_tensor(atoms_flat) #_NC2
 
-        split = 2 #100 #500 #200 #2
-        train = round(len(molecule.coords) / split, 3)
-        print('\nget train and test sets, '\
-                'training set is {} points'.format(train))
-        Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
-                split) #get train and test sets
+        training_model = True
+        if training_model:
+            #for training a model
+            get_data = True
+            load_first = True
+            fit = True
+            load_weights = False
+            inp_out_pred = True
+
+        if training_model == False:
+            #for loading a model to use with openmm
+            get_data = False
+            load_first = False
+            fit = False
+            load_weights = True
+            inp_out_pred = False
+
+        #get_data = True
+        if get_data:
+            split = 2 #100 #500 #200 #2
+            train = round(len(molecule.coords) / split, 3)
+            print('\nget train and test sets, '\
+                    'training set is {} points'.format(train))
+            Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
+                    split) #get train and test sets
+            '''
+            print('!!!use regularly spaced training')
+            molecule.train = np.arange(2, len(molecule.coords), split).tolist() 
+            molecule.test = [x for x in range(0, len(molecule.coords)) 
+                    if x not in molecule.train]
+            '''
+
+            input_coords = molecule.coords#.reshape(-1,n_atoms*3)
+            input_NRF = molecule.mat_NRF.reshape(-1,_NC2)
+            #input_eij = molecule.mat_eij
+            output_matFE = molecule.mat_FE.reshape(-1,_NC2)
+            output_FE = np.concatenate((molecule.forces.reshape(-1,n_atoms*3), 
+                    molecule.energies.reshape(-1,1)), axis=1)
+            output_F = molecule.forces.reshape(-1,n_atoms,3)
+            output_E = molecule.energies.reshape(-1,1)
+            output_E_postscale = ((output_E - prescale1[2]) / 
+                    (prescale1[3] - prescale1[2]) * 
+                    (prescale1[1] - prescale1[0]) + prescale1[0])
+            #output_atomFE = molecule.atomFE.reshape(-1,n_atoms) #per atom Es
+            #output_atomNRF = molecule.atomNRF.reshape(-1,n_atoms) #per atom NRFs
+
+            train_input_coords = np.take(input_coords, molecule.train, axis=0)
+            test_input_coords = np.take(input_coords, molecule.test, axis=0)
+            train_input_NRF = np.take(input_NRF, molecule.train, axis=0)
+            test_input_NRF = np.take(input_NRF, molecule.test, axis=0)
+            #train_input_eij = np.take(input_eij, molecule.train, axis=0)
+            train_output_matFE = np.take(output_matFE, molecule.train, axis=0)
+            test_output_matFE = np.take(output_matFE, molecule.test, axis=0)
+            train_output_FE = np.take(output_FE, molecule.train, axis=0)
+            train_output_E = np.take(output_E, molecule.train, axis=0)
+            test_output_E = np.take(output_E, molecule.test, axis=0)
+            #train_output_atomFE = np.take(output_atomFE, molecule.train, axis=0)
+            #test_output_atomFE = np.take(output_atomFE, molecule.test, axis=0)
+            #train_output_atomNRF = np.take(output_atomNRF, molecule.train, axis=0)
+            #test_output_atomNRF = np.take(output_atomNRF, molecule.test, axis=0)
+
+            train_mat_r = np.take(molecule.mat_r, molecule.train, axis=0)
+            train_forces = np.take(molecule.forces, molecule.train, axis=0)
+            test_forces = np.take(molecule.forces, molecule.test, axis=0)
+
+            max_NRF1 = np.max(np.abs(train_input_NRF))
+            max_FE1 = np.max(np.abs(train_output_FE))
+            #max_atomFE1 = np.max(np.abs(train_output_atomFE))
+            #max_atomNRF1 = np.max(np.abs(train_output_atomNRF))
+            train_output_matFE_scaled = train_output_matFE / (2 * max_FE1) + 0.5
+            train_input_NRF_scaled = np.take(input_NRF, molecule.train, axis=0)\
+                    / max_NRF1
+            print(train_input_coords.shape, train_output_FE.shape)
+            print('max_NRF: {}, max_FE: {}'.format(max_NRF1, max_FE1))
+            #print('max_atomE: {} max_atomNRF: {}'.format(max_atomFE1, 
+                #max_atomNRF1))
+            max_NRF = tf.constant(max_NRF1, dtype=tf.float32)
+            max_FE = tf.constant(max_FE1, dtype=tf.float32)
+            #max_atomFE = tf.constant(max_atomFE1, dtype=tf.float32)
+            #max_atomNRF = tf.constant(max_atomNRF1, dtype=tf.float32)
+            prescale = tf.constant(prescale1, dtype=tf.float32)
+            n_atoms_tf = tf.constant(n_atoms, dtype=tf.int32)
 
 
+            '''
+            ##hard code permutations for now
+            print('\n!!!! permuting hard-coded')
+            orig_perm = [0,2,3,4,6,7,5,8]
+            new_perm = [2,0,4,3,7,6,8,5]
+            train_input_coords2 = np.copy(train_input_coords)
+            train_input_coords2[:, orig_perm] = train_input_coords2[:, new_perm]
+            train_forces2 = np.copy(train_forces)
+            train_forces2[:, orig_perm] = train_forces[:, new_perm]
+            train_output_E2 = np.copy(train_output_E)
+            train_input_coords = np.concatenate((train_input_coords, 
+                    train_input_coords2), axis=0)
+            train_forces = np.concatenate((train_forces, train_forces2), axis=0)
+            train_output_E = np.concatenate((train_output_E, train_output_E2), 
+                    axis=0)
+            train_output_matFE = \
+                    Converter.get_simultaneous_interatomic_energies_forces2(
+                    molecule.atoms, train_input_coords, train_forces, 
+                    train_output_E, bias_type='1/r')
+            Writer.write_xyz(train_input_coords, molecule.atoms, 
+                    'train-coords.xyz', 'w')
+            '''
 
-        input_coords = molecule.coords#.reshape(-1,n_atoms*3)
-        input_NRF = molecule.mat_NRF.reshape(-1,_NC2)
-        input_eij = molecule.mat_eij
-        output_matFE = molecule.mat_FE.reshape(-1,_NC2)
-        output_FE = np.concatenate((molecule.forces.reshape(-1,n_atoms*3), 
-                molecule.energies.reshape(-1,1)), axis=1)
-        output_F = molecule.forces.reshape(-1,n_atoms*3)
-        output_E = molecule.energies.reshape(-1,1)
-        output_E_postscale = ((output_E - prescale1[2]) / 
-                (prescale1[3] - prescale1[2]) * 
-                (prescale1[1] - prescale1[0]) + prescale1[0])
-        output_atomFE = molecule.atomFE.reshape(-1,n_atoms) #per atom Es
-        output_atomNRF = molecule.atomNRF.reshape(-1,n_atoms) #per atom NRFs
+            equiv_atoms = False
+            if equiv_atoms:
+                print('permutations - sorting of equiv_atoms')
+                A = Molecule.find_bonded_atoms(molecule.atoms, 
+                        molecule.coords[0])
+                indices, pairs_dict = Molecule.find_equivalent_atoms(
+                        molecule.atoms, A)
+                print('indices', indices)
+                print('pairs_dict', pairs_dict)
+                all_sorted_list, all_resorted_list = Molecule.get_sorted_pairs(
+                        train_input_NRF, pairs_dict)
+                print('sorted', all_sorted_list[0])
+                print('resorted', all_resorted_list[0])
+                sys.stdout.flush()
+                #print('\norig input', input)
+                input = np.take_along_axis(train_input_NRF, 
+                        all_sorted_list, axis=1)
+                #print('\nnew input', input)
+                output = np.take_along_axis(train_output_matFE, 
+                        all_sorted_list, axis=1)
+                np.savetxt('orig_input_NRF.txt', train_input_NRF)
+                np.savetxt('orig_output_matFE.txt', train_output_matFE)
+                np.savetxt('perm_input_NRF.txt', input)
+                np.savetxt('perm_output_matFE.txt', output)
 
-        train_input_coords = np.take(input_coords, molecule.train, axis=0)
-        test_input_coords = np.take(input_coords, molecule.test, axis=0)
-        train_input_NRF = np.take(input_NRF, molecule.train, axis=0)
-        test_input_NRF = np.take(input_NRF, molecule.test, axis=0)
-        train_input_eij = np.take(input_eij, molecule.train, axis=0)
-        train_output_matFE = np.take(output_matFE, molecule.train, axis=0)
-        test_output_matFE = np.take(output_matFE, molecule.test, axis=0)
-        train_output_FE = np.take(output_FE, molecule.train, axis=0)
-        train_output_E = np.take(output_E, molecule.train, axis=0)
-        test_output_E = np.take(output_E, molecule.test, axis=0)
-        train_output_atomFE = np.take(output_atomFE, molecule.train, axis=0)
-        test_output_atomFE = np.take(output_atomFE, molecule.test, axis=0)
-        train_output_atomNRF = np.take(output_atomNRF, molecule.train, axis=0)
-        test_output_atomNRF = np.take(output_atomNRF, molecule.test, axis=0)
-
-        train_mat_r = np.take(molecule.mat_r, molecule.train, axis=0)
-        train_forces = np.take(molecule.forces, molecule.train, axis=0)
-        test_forces = np.take(molecule.forces, molecule.test, axis=0)
-
-        max_NRF1 = np.max(np.abs(train_input_NRF))
-        max_FE1 = np.max(np.abs(train_output_FE))
-        max_atomFE1 = np.max(np.abs(train_output_atomFE))
-        max_atomNRF1 = np.max(np.abs(train_output_atomNRF))
-        train_output_matFE_scaled = train_output_matFE / (2 * max_FE1) + 0.5
-        train_input_NRF_scaled = np.take(input_NRF, molecule.train, axis=0)\
-                / max_NRF1
-        print(train_input_coords.shape, train_output_FE.shape)
-        print('max_NRF: {}, max_FE: {} max_atomE: {} max_atomNRF: {}'.format(
-                max_NRF1, max_FE1, max_atomFE1, max_atomNRF1))
-        max_NRF = tf.constant(max_NRF1, dtype=tf.float32)
-        max_FE = tf.constant(max_FE1, dtype=tf.float32)
-        max_atomFE = tf.constant(max_atomFE1, dtype=tf.float32)
-        max_atomNRF = tf.constant(max_atomNRF1, dtype=tf.float32)
-        prescale = tf.constant(prescale1, dtype=tf.float32)
-        n_atoms_tf = tf.constant(n_atoms, dtype=tf.float32)
-
-
-        '''
-        ##hard code permutations for now
-        print('\n!!!! permuting hard-coded')
-        orig_perm = [0,2,3,4,6,7,5,8]
-        new_perm = [2,0,4,3,7,6,8,5]
-        train_input_coords2 = np.copy(train_input_coords)
-        train_input_coords2[:, orig_perm] = train_input_coords2[:, new_perm]
-        train_forces2 = np.copy(train_forces)
-        train_forces2[:, orig_perm] = train_forces[:, new_perm]
-        train_output_E2 = np.copy(train_output_E)
-        train_input_coords = np.concatenate((train_input_coords, 
-                train_input_coords2), axis=0)
-        train_forces = np.concatenate((train_forces, train_forces2), axis=0)
-        train_output_E = np.concatenate((train_output_E, train_output_E2), 
-                axis=0)
-        train_output_matFE = \
-                Converter.get_simultaneous_interatomic_energies_forces2(
-                molecule.atoms, train_input_coords, train_forces, 
-                train_output_E, bias_type='1/r')
-        Writer.write_xyz(train_input_coords, molecule.atoms, 
-                'train-coords.xyz', 'w')
-        '''
-
-        equiv_atoms = False
-        if equiv_atoms:
-            print('permutations - sorting of equiv_atoms')
-            A = Molecule.find_bonded_atoms(molecule.atoms, 
-                    molecule.coords[0])
-            indices, pairs_dict = Molecule.find_equivalent_atoms(
-                    molecule.atoms, A)
-            print('indices', indices)
-            print('pairs_dict', pairs_dict)
-            all_sorted_list, all_resorted_list = Molecule.get_sorted_pairs(
-                    train_input_NRF, pairs_dict)
-            print('sorted', all_sorted_list[0])
-            print('resorted', all_resorted_list[0])
-            sys.stdout.flush()
-            #print('\norig input', input)
-            input = np.take_along_axis(train_input_NRF, 
-                    all_sorted_list, axis=1)
-            #print('\nnew input', input)
-            output = np.take_along_axis(train_output_matFE, 
-                    all_sorted_list, axis=1)
-            np.savetxt('orig_input_NRF.txt', train_input_NRF)
-            np.savetxt('orig_output_matFE.txt', train_output_matFE)
-            np.savetxt('perm_input_NRF.txt', input)
-            np.savetxt('perm_output_matFE.txt', output)
-
-            sys.exit()
+                sys.exit()
 
 
-        #train_output_E_postscale = ((train_output_E / prescale1[1]) 
-                #- prescale1[0])
-        #test_output_E_postscale = ((test_output_E / prescale1[1]) 
-                #- prescale1[0])
-        train_output_E_postscale = ((train_output_E - prescale1[2]) / 
-                (prescale1[3] - prescale1[2]) * 
-                (prescale1[1] - prescale1[0]) + prescale1[0])
-        test_output_E_postscale = ((test_output_E - prescale1[2]) / 
-                (prescale1[3] - prescale1[2]) * 
-                (prescale1[1] - prescale1[0]) + prescale1[0])
+            train_output_E_postscale = ((train_output_E - prescale1[2]) / 
+                    (prescale1[3] - prescale1[2]) * 
+                    (prescale1[1] - prescale1[0]) + prescale1[0])
+            test_output_E_postscale = ((test_output_E - prescale1[2]) / 
+                    (prescale1[3] - prescale1[2]) * 
+                    (prescale1[1] - prescale1[0]) + prescale1[0])
 
-        val_points = 50 #50
-        print('val points: {}'.format(val_points))
-        ###get validation from within training
-        train2, val = Molecule.make_train_test(train_output_E.flatten(), 
-                n_train=len(train_output_E)-val_points, n_test=val_points)
-        train2_input_coords = np.take(train_input_coords, train2, axis=0)
-        val_input_coords = np.take(train_input_coords, val, axis=0)
-        train2_output_E = np.take(train_output_E, train2, axis=0)
-        val_output_E = np.take(train_output_E, val, axis=0)
-        train2_output_E_postscale = np.take(train_output_E_postscale, 
-                train2, axis=0)
-        val_output_E_postscale = np.take(train_output_E_postscale, 
-                val, axis=0)
-        train2_forces = np.take(train_forces, train2, axis=0)
-        val_forces = np.take(train_forces, val, axis=0)
-        train2_output_matFE = np.take(train_output_matFE, train2, axis=0)
-        val_output_matFE = np.take(train_output_matFE, val, axis=0)
-        train2_output_atomFE = np.take(train_output_atomFE, train2, axis=0)
-        val_output_atomFE = np.take(train_output_atomFE, val, axis=0)
-        train2_output_atomNRF = np.take(train_output_atomNRF, train2, axis=0)
-        val_output_atomNRF = np.take(train_output_atomNRF, val, axis=0)
-        train2_input_NRF = np.take(train_input_NRF, train2, axis=0)
-        val_input_NRF = np.take(train_input_NRF, val, axis=0)
-
-        '''
-        train_forces_rms = np.sqrt(np.mean(train_forces.flatten()**2))
-        train_energies_mean = np.mean(train_output_E.flatten())
-        train_output_E_postscale = ((train_output_E - train_energies_mean) / 
-                train_forces_rms)
-        train_forces = train_forces / train_forces_rms
-        test_output_E_postscale = ((test_output_E - train_energies_mean) / 
-                train_forces_rms)
-        test_forces = test_forces / train_forces_rms
-        '''
+            val_points = 50 #50
+            print('val points: {}'.format(val_points))
+            ###get validation from within training
+            train2, val = Molecule.make_train_test(train_output_E.flatten(), 
+                    n_train=len(train_output_E)-val_points, n_test=val_points)
+            train2_input_coords = np.take(train_input_coords, train2, axis=0)
+            val_input_coords = np.take(train_input_coords, val, axis=0)
+            train2_output_E = np.take(train_output_E, train2, axis=0)
+            val_output_E = np.take(train_output_E, val, axis=0)
+            train2_output_E_postscale = np.take(train_output_E_postscale, 
+                    train2, axis=0)
+            val_output_E_postscale = np.take(train_output_E_postscale, 
+                    val, axis=0)
+            train2_forces = np.take(train_forces, train2, axis=0)
+            print('train2 max F: {}, min F {}'.format(
+                np.max(train2_forces), np.min(train2_forces)))
+            val_forces = np.take(train_forces, val, axis=0)
+            train2_output_matFE = np.take(train_output_matFE, train2, axis=0)
+            val_output_matFE = np.take(train_output_matFE, val, axis=0)
+            #train2_output_atomFE = np.take(train_output_atomFE, train2, 
+                    #axis=0)
+            #val_output_atomFE = np.take(train_output_atomFE, val, axis=0)
+            #train2_output_atomNRF = np.take(train_output_atomNRF, train2, 
+                    #axis=0)
+            #val_output_atomNRF = np.take(train_output_atomNRF, val, axis=0)
+            train2_input_NRF = np.take(train_input_NRF, train2, axis=0)
+            val_input_NRF = np.take(train_input_NRF, val, axis=0)
 
 
-        def custom_loss1(weights):
-            def custom_loss(y_true, y_pred):
-                return K.mean(K.abs(y_true - y_pred) * weights) #mae
-            return custom_loss
-        weights = 0 #np.zeros((1)) #np.zeros((n_atoms*3+1))
-        #weights[-1] = 0 #1/_NC2 #* n_atoms
-        cl = custom_loss1(weights)
+        if get_data == False: #hardcoded
+            #prescale1 = [-167314.95257129727, -167288.0645391319, 
+                    #-184.62847828601284, 211.23633766510102]
+            prescale1 = [-167315.01917961572, -167288.834575252, 
+                    -260.631337453833, 284.98286516421035]
+            #max_NRF1 = 12304.734510536122
+            max_NRF1 = 13010.961100355082 
+            #max_FE1 = 211.23633766510105
+            max_FE1 = 284.98286516421035
+            print('\n!!!!scaled values over-written')
+            print('prescale', prescale1)
+            print('max_NRF', max_NRF1)
+            print('max_FE', max_FE1)
+            max_NRF = tf.constant(max_NRF1, dtype=tf.float32)
+            max_FE = tf.constant(max_FE1, dtype=tf.float32)
+            prescale = tf.constant(prescale1, dtype=tf.float32)
+            n_atoms_tf = tf.constant(n_atoms, dtype=tf.int32)
 
 
         file_name='best_model'
-        mc = ModelCheckpoint(file_name, monitor='loss', mode='min', 
-                save_best_only=True, save_weights_only=True)
-        es = EarlyStopping(monitor='loss', patience=1000)
-
-        '''
-        #######################---DECOMP-TEST---############################
-        #######################---DECOMP-TEST---############################
-        coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
-        decompFE_layer = Input(shape=(_NC2,), name='decompFE_layer')
-        scale_layer = ScaleFE(_NC2, max_FE, name='scale_layer')(
-                decompFE_layer)
-        triangle_layer = Triangle(n_atoms, name='triangle_layer')(
-                scale_layer)
-        concat_layer = concatenate([coords_layer, triangle_layer])
-        eij_layer = EijMatrix_test(n_atoms, _NC2, max_FE, prescale, 
-                name='eij_layer')(concat_layer)
-
-        model = Model(inputs=[coords_layer, decompFE_layer], 
-                outputs=[eij_layer])
-
-        layer_output = Model(inputs=model.input, 
-                #outputs=model.get_layer('eij_layer').output
-                #outputs=model.get_layer('concatenate_1').output
-                outputs=model.get_layer('triangle_layer').output
+        monitor_loss='loss'
+        set_patience=5000
+        print('monitor_loss:', monitor_loss)
+        print('set_patience', set_patience)
+        mc = ModelCheckpoint(file_name, monitor=monitor_loss, mode='min', 
+                save_best_only=True, save_weights_only=True
                 )
-        out = layer_output.predict([
-            train_input_coords[0].reshape(1,n_atoms,3), 
-            train_output_matFE_scaled[0].reshape(1,_NC2)])
+        es = EarlyStopping(monitor=monitor_loss, patience=set_patience)
 
-        print('pred\n', out.shape, '\n', out)
-        print('coords\n', train_input_coords[0])
-        print('matFE\n', train_output_matFE[0])
-        print('forces\n', train_forces[0])
-        print('E\n', train_output_E_postscale[0])
-        sys.exit()
-        #######################---DECOMP-TEST---############################
-        #######################---DECOMP-TEST---############################
-        '''
 
-        coords = tf.convert_to_tensor(input_coords[0].reshape(1,n_atoms,3),
-                dtype=tf.float32)
-        angleNRF = CoordsTo_angleNRF(n_atoms_tf, atoms_flat, atoms2, 
-                max_NRF, _NC2, name='angleNRF_layer')(coords)
-        print(angleNRF)
-        sys.exit()
 
-        #######################---TEST---##############################
-        #######################---TEST---##############################
-        coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
-
-        #NRF_layer = CoordsToNRF_test(atoms_flat, atoms2, max_NRF, _NC2, 
+        #coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
+        #NRF_layer = CoordsToNRF_test(atoms_flat, max_NRF, _NC2, 
                 #name='NRF_layer')(coords_layer)
-        angleNRF_layer = CoordsTo_angleNRF(n_atoms_tf, atoms_flat, atoms2, 
-                max_NRF, _NC2, name='angleNRF_layer')(coords_layer)
-        net_layer = Dense(units=1000, activation='sigmoid', 
-                name='net_layer')(angleNRF_layer)
+        #model = NRF_layer
+        
+        max_depth = 1
+        print('max_depth', max_depth)
+        e_loss = [0, 1, 1, 1, 1, 1, 1] #1
+        f_loss = [0, 0, 0, 0, 0, 0, 0] #0
+        grad_loss = [0, 1000, 1000, 1000, 1000, 1000, 1000] #1000
+        q_loss = [1, 1, 1, 1, 1, 1, 1] #_NC2 
+        best_error_all = 1e20
+        best_iteration = 0
+        best_model = None
+        for l in range(0, max_depth):
+            print('l', l)
+            l2 = str(l)
+            print('E loss weight: {} \nrecompF loss: {} '\
+                    '\ndE_dx loss weight: {} \nq loss weight: {}'.format(
+                    e_loss[l], f_loss[l], grad_loss[l], q_loss[l]))
+            #if l > 0:
+                #model = concatenate([model2[3], NRF_layer])
+            coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
+            NRF_layer = CoordsToNRF_test(atoms_flat, max_NRF, _NC2, 
+                    name='NRF_layer')(coords_layer)
 
-        '''
-        net_layer = Dense(units=int(_NC2*0.5), activation='sigmoid', 
-                name='net_layer')(NRF_layer)
-        net_layerK = Dense(units=_NC2*2, activation='sigmoid', 
-                name='net_layerK')(net_layer)
-        net_layerL = Dense(units=_NC2*3, activation='sigmoid', 
-                name='net_layerL')(net_layerK)
-        #net_layerN = Dense(units=_NC2*2, activation='sigmoid', 
-                #name='net_layerN')(net_layerL)
-        '''
-        #'''
-        net_layer2 = Dense(units=_NC2, activation='sigmoid', 
-                name='net_layer2')(net_layer)
-        scale_layer = ScaleFE(_NC2, max_FE, name='scale_layer')(net_layer2)
-        triangle_layer = Triangle(n_atoms, name='triangle_layer')(
-                scale_layer)
-        concat_layer = concatenate([coords_layer, triangle_layer])
-        eij_layer = EijMatrix_test(n_atoms, _NC2, max_FE, prescale, 
-                name='eij_layer')(concat_layer)
-        eij_layer2 = EijMatrix_test2(n_atoms, _NC2, max_FE, prescale, 
-                name='eij_layer2')(concat_layer)
-        #'''
-
-        #atomNRF_layer = CoordsTo_atomNRF(atoms_flat, atoms2, max_atomNRF, 
-                #_NC2, name='atomNRF_layer')(coords_layer)
-        '''
-        net_layer = Dense(units=n_atoms*5, activation='sigmoid', 
-                name='net_layer')(atomNRF_layer)
-        net_layerK = Dense(units=n_atoms*4, activation='sigmoid', 
-                name='net_layerK')(net_layer)
-        net_layerL = Dense(units=n_atoms*3, activation='sigmoid', 
-                name='net_layerL')(net_layerK)
-        net_layerN = Dense(units=n_atoms*2, activation='sigmoid', 
-                name='net_layerN')(net_layerL)
-        net_layer2 = Dense(units=n_atoms, activation='sigmoid', 
-                name='net_layer2')(net_layerN)
-        '''
+            net_layers = []
+            for x in range(_NC2):
+                net_layerA = Dense(units=5, activation='sigmoid', 
+                        name='net_layerA_{}'.format(x))(NRF_layer)
+                net_layerB = Dense(units=4, activation='sigmoid', 
+                        name='net_layerB_{}'.format(x))(net_layerA)
+                net_layerC = Dense(units=3, activation='sigmoid', 
+                        name='net_layerC_{}'.format(x))(net_layerB)
+                net_layerD = Dense(units=1, activation='sigmoid', 
+                        name='net_layerD_{}'.format(x))(net_layerC)
+                net_layers.append(net_layerD)
+            net_layer2 = concatenate(net_layers, name='net_layer2')
 
 
-        '''
-        net_layer2 = Dense(units=_NC2, activation='sigmoid', 
-                name='net_layer2')(net_layer)
-        scale_layer = ScaleFE(_NC2, max_FE, name='scale_layer')(net_layer2)
-        triangle_layer = Triangle(n_atoms, name='triangle_layer')(
-                scale_layer)
-        '''
-
-        '''
-        atomE_layer = Dense(units=n_atoms, activation='sigmoid', 
-                name='atomE_layer')(net_layer)
-        scale_atomE_layer = Scale_atomE(n_atoms, max_atomFE, 
-                name='scale_atomE_layer')(atomE_layer)
-        #atomE_layer = atomE_test(n_atoms, _NC2, max_FE, prescale, 
-                #name='atomE_layer')(triangle_layer)
-        sum_atomE_layer = sum_atomE_test(n_atoms, _NC2, max_FE, prescale, 
-                name='sum_atomE_layer')(scale_atomE_layer)
-        '''
-
-
-        #energy_layer = TotalEnergy_test(prescale, n_atoms, _NC2, 
-                #name='energy_layer')(eij_layer)
-        '''
-        scale_layer2 = ScaleE(_NC2, max_FE, name='scale_layer2')(eij_layer)
-        net_layer3 = Dense(units=1000, activation='sigmoid', 
-                name='net_layer3')(scale_layer2)
-        net_layer4 = Dense(units=_NC2, activation='sigmoid', 
-                name='net_layer4')(net_layer3)
-        unscale_layer = UnscaleE(_NC2, max_FE, name='unscale_layer')(
-                net_layer4)
-        '''
-
-        def custom_gradient(y, x):
-            gradients = tf.gradients(y, x, 
-                    colocate_gradients_with_ops=True, 
-                    unconnected_gradients='zero')
-            return gradients[0] * -1
-
-        dE_dx = Lambda(lambda x: custom_gradient(
-                eij_layer, 
-                #sum_atomE_layer, 
-                coords_layer), name='dE_dx')
-        dE_dx = dE_dx(coords_layer)
-
-        '''
-        optimizers = [tf.keras.optimizers.Adam(learning_rate=1e-5),
-                tf.keras.optimizers.Adam(learning_rate=1e-3)]
-        optimizers_and_layers = [(optimizers[0], model.layers[0:]), 
-                (optimizers[1], model.layers[-1])]
-        custom_optimizer = tfa.optimizers.MultiOptimizer(
-                optimizers_and_layers)
-        '''
-
-        '''
-        def get_lr_metric(optimizer):
-            def lr(y_true, y_pred):
-                return optimizer.lr
-            return lr
-
-        rlrop = ReduceLROnPlateau(monitor='loss', factor=0.8, 
-                patience=50, min_lr=1e-6)
-        optimizer = keras.optimizers.Adam(lr=0.001, 
-                beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=True)
-        lr_metric = get_lr_metric(optimizer)
-        '''
+            #net_layer = Dense(units=1000, activation='sigmoid', 
+                    #name='net_layer')(NRF_layer) #(model)
+            #net_layer2 = Dense(units=_NC2, activation='sigmoid', 
+                    #name='net_layer2')(net_layer)
+            scale_layer = ScaleFE(_NC2, max_FE, name='scale_layer')(net_layer2)
+            eij_layer = EijMatrix_test(n_atoms, _NC2, prescale, 
+                    name='eij_layer')([coords_layer, scale_layer])
+            eij_layer2 = EijMatrix_test2(n_atoms, _NC2, 
+                    name='eij_layer2')([coords_layer, scale_layer])
+            dE_dx = EnergyGradient(n_atoms, _NC2, 
+                    name='dE_dx')([eij_layer, coords_layer])
 
 
 
-        model = Model(inputs=[coords_layer], 
-                #outputs=[eij_layer, dE_dx]
-                outputs=[angleNRF_layer, eij_layer, dE_dx, scale_layer, eij_layer2], 
-                    #atomE_layer, sum_atomE_layer]
-                #outputs=[dE_dx, scale_atomE_layer, sum_atomE_layer]
-                #outputs=[dE_dx, atomE_layer, sum_atomE_layer]
-                #outputs=[dE_dx, scale_layer, atomE_layer, sum_atomE_layer]
-                )
+            #x = tf.constant(train2_input_coords)
+            #with tf.GradientTape(watch_accessed_variables=False) as tape:
+                #tape.watch(x)
+                #y = model(x)[0]
+                #y = EijMatrix_test(n_atoms, _NC2, prescale)([x, triangle_layer])
 
-        e_loss = 1
-        f_loss = 0 
-        grad_loss = 1000 #n_atoms**2
-        q_loss = n_atoms #_NC2
-        atomE_loss = 0
-        sum_atomE_loss = 0
-        print('E loss weight: {} \ndE_dx loss weight: {} \n'\
-                'q loss weight: {} \nrecompF loss: {} '\
-                '\natomE loss: {} \nsum_atomE loss: {}'.format(
-                e_loss, grad_loss, q_loss, f_loss, atomE_loss, 
-                sum_atomE_loss))
-        model.compile(#loss='mse', 
-                loss={
-                    'angleNRF_layer': 'mse',
-                    'eij_layer': 'mse', #cl
-                    'scale_layer': 'mse', #cl
-                    'dE_dx': 'mse', 
-                    'eij_layer2': 'mse', 
-                    #'atomE_layer': 'mse', 
-                    #'scale_atomE_layer': 'mse', 
-                    #'sum_atomE_layer': 'mse'
-                    },
-                #loss={'eij_layer': 'mse', 'dE_dx': 'mse'},
-                loss_weights={
-                    'angleNRF_layer': 0,
-                    'eij_layer': e_loss, 
-                    'dE_dx': grad_loss, 
-                    'scale_layer': q_loss, 'eij_layer2': f_loss, 
-                    #'atomE_layer': atomE_loss, 
-                    #'scale_atomE_layer': atomE_loss, 
-                    #'sum_atomE_layer': sum_atomE_loss
-                    },
-                #loss_weights={'eij_layer': e_loss, 'dE_dx': f_loss},
-                #loss_weights={'eij_layer': 1/(n_atoms+1), 
-                    #'dE_dx': n_atoms/(n_atoms+1)},
-                optimizer='adam', #metrics=['mae']
-                #optimizer=optimizer, metrics=[lr_metric],
-                )
-        model.summary()
+            #dE_dx = tape.gradient(y, x)
+            #print('xxx', net_layer.trainable_variables)
 
-        print('initial learning rate:', K.eval(model.optimizer.lr))
 
-        load_first = False
-        if load_first:
-            model.load_weights('best_model1')
+            '''
+            with tf.GradientTape() as tape:
+                y = EijMatrix_test(n_atoms, _NC2, prescale)(
+                        [coords_layer, triangle_layer])
+            dE_dx = tape.gradient(y, train2_input_coords)
 
-        fit = True
-        if fit:
-            model.fit(train2_input_coords, 
-                    [
-                        train2_input_NRF,
-                        train2_output_E_postscale, 
-                        train2_forces, 
-                        train2_output_matFE, train2_forces, 
-                        #train2_output_atomFE, 
-                        #train2_output_E_postscale
-                        ],
-                    validation_data=(val_input_coords, 
+            for var, g in zip(EijMatrix_test(n_atoms, _NC2, prescale
+                    ).trainable_variables, dE_dx):
+                print(f'{var.name}, shape: {g.shape}')
+            '''
+
+
+            '''
+            optimizers = [tf.keras.optimizers.Adam(learning_rate=1e-5),
+                    tf.keras.optimizers.Adam(learning_rate=1e-3)]
+            optimizers_and_layers = [(optimizers[0], model.layers[0:]), 
+                    (optimizers[1], model.layers[-1])]
+            custom_optimizer = tfa.optimizers.MultiOptimizer(
+                    optimizers_and_layers)
+
+            def get_lr_metric(optimizer):
+                def lr(y_true, y_pred):
+                    return optimizer.lr
+                return lr
+
+            rlrop = ReduceLROnPlateau(monitor='loss', factor=0.8, 
+                    patience=1000, min_lr=1e-6)
+            optimizer = keras.optimizers.Adam(lr=0.001, 
+                    beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=True)
+            lr_metric = get_lr_metric(optimizer)
+            '''
+
+
+
+            model = Model(
+                    inputs=[coords_layer], 
+                    #inputs=[NRF_layer], 
+                    outputs=[
+                        #coords_layer,
+                        #forces_layer, 
+                        eij_layer, 
+                        eij_layer2, 
+                        dE_dx, 
+                        scale_layer, 
+                        #net_layer2,
+                        #eij_layer2
+                        ], 
+                    )
+
+            #with tf.GradientTape(watch_accessed_variables=False) as tape:
+                #tape.watch(x)
+                #y = model(x)[0]
+            #print(l, 'start grads\n', tape.gradient(y, x)) 
+            #print(l, 'start trainable vars\n', model.trainable_variables)
+            #print()
+
+            #https://stackoverflow.com/questions/69597055/
+                #custom-loss-function-with-gradient-tape-tf2-6
+            def custom_loss_pass(model, x_tensor, forces):
+                def custom_loss(y_true, y_pred):
+                    with tf.GradientTape() as tape:
+                        tape.watch(x_tensor)
+                        output_E = model(x_tensor)[0]
+                    dEdX = tape.gradient(output_E, x_tensor)
+                    minus_dEdX = dEdX * -1
+                    f_diff = forces - minus_dEdX
+                    f_loss = tf.reduce_mean(tf.square(f_diff))
+                    #e_diff = energies - output_E
+                    #e_loss = tf.reduce_mean(tf.square(e_diff))
+                    #_loss = f_loss * f_weight #+ e_loss * e_weight
+                    return f_loss
+                return custom_loss
+
+
+
+
+            if l == 0:
+                model.compile(
+                        loss={
+                            #'for_forces': custom_loss_pass(model, 
+                            #tf.constant(train2_input_coords, 
+                                #dtype=tf.float32),
+                            #tf.constant(train2_forces, dtype=tf.float32),
+                            #),
+                            'energy_gradient': 'mse',
+                            'eij_matrix_test': 'mse',
+                            'eij_matrix_test2': 'mse',
+                            'scale_fe': 'mse',
+                            #'coords_layer': 'mse'
+                            },
+                        loss_weights={
+                            #'for_forces': 0, #grad_loss - q_loss[l],
+                            'energy_gradient': grad_loss[l],
+                            'eij_matrix_test': e_loss[l],
+                            'eij_matrix_test2': f_loss[l],
+                            'scale_fe': q_loss[l],
+                            #'coords_layer': 0
+                            },
+                        optimizer='adam')
+            if l != 0:
+                model.compile(
+                        loss={
+                            #'for_forces_'+l2: custom_loss_pass(model, 
+                            #tf.constant(train_input_coords, dtype=tf.float32),
+                            #tf.constant(train_forces, dtype=tf.float32),
+                            #),
+                            'energy_gradient_'+l2: 'mse',
+                            'eij_matrix_test_'+l2: 'mse',
+                            'eij_matrix_test2_'+l2: 'mse',
+                            'scale_fe_'+l2: 'mse',
+                            #'coords_layer': 'mse'
+                            },
+                        loss_weights={
+                            #'for_forces_'+l2: 0, #grad_loss - q_loss[l],
+                            'energy_gradient_'+l2: grad_loss[l],
+                            'eij_matrix_test_'+l2: e_loss[l],
+                            'eij_matrix_test2_'+l2: f_loss[l],
+                            'scale_fe_'+l2: q_loss[l],
+                            #'coords_layer': 0
+                            },
+                        optimizer='adam')
+
+            model.summary()
+
+            print('initial learning rate:', K.eval(model.optimizer.lr))
+
+            #load_first = True
+            if load_first and l != 0:
+                print('!!!loading previous weights first')
+                l3 = str(l-1)
+                #model.load_weights('best_model1')
+                model.load_weights('best_ever_model_'+l3)
+
+            '''
+            if load_first and l == 0:
+                print('!!!loading previous weights first')
+                model.load_weights('1/best_ever_model_5')
+            '''
+
+            #fit = True
+            if fit:
+                model.fit(train2_input_coords, 
+                        #train2_input_NRF,
                         [
-                            val_input_NRF,
+                            #train2_input_coords,
+                            #train2_output_E_postscale, 
+                            train2_output_E_postscale, 
+                            train2_forces, 
+                            train2_forces, 
+                            #train2_output_matFE, 
+                            train2_output_matFE, 
+                            #train2_forces, 
+                            ],
+                        validation_data=(val_input_coords, 
+                            #val_input_NRF,
+                            [
+                                #val_input_coords,
+                                #val_output_E_postscale, 
+                                val_output_E_postscale, 
+                                val_forces, 
+                                val_forces, 
+                                #val_output_matFE, 
+                                val_output_matFE, 
+                                #val_forces, 
+                                ]),
+                        epochs=5000,#00, 
+                        verbose=2,
+                        #callbacks=[mc],
+                        callbacks=[es,mc],
+                        #callbacks=[es,mc,rlrop],
+                        )
+
+                best_error = model.evaluate(train2_input_coords, 
+                        #train_input_NRF,
+                        [
+                            #train_input_coords,
+                            #train2_output_E_postscale, 
+                            train2_output_E_postscale, 
+                            train2_forces, 
+                            train2_forces, 
+                            #train_output_matFE, 
+                            train2_output_matFE, 
+                            #train_forces, 
+                            ],
+                        verbose=0)
+                print(l, 'model error train2: ', best_error)
+
+                best_error2 = model.evaluate(val_input_coords, 
+                        [
                             val_output_E_postscale, 
                             val_forces, 
-                            val_output_matFE, val_forces, 
-                            #val_output_atomFE, val_output_E_postscale
-                            ]),
-                    epochs=100, 
-                    verbose=2,
-                    callbacks=[mc],
-                    #callbacks=[es,mc],
-                    #callbacks=[es,mc,rlrop],
-                    )
-            #model.save_weights('model/model_weights.h5')
-        #model.load_weights('model/model_weights.h5')
-        model.load_weights('best_model')
+                            val_forces, 
+                            val_output_matFE, 
+                            ],
+                        verbose=0)
+                print(l, 'model error val: ', best_error2)
 
-        best_error = model.evaluate(train_input_coords, 
-                [
-                    train_input_NRF,
-                    train_output_E_postscale, 
-                    train_forces, 
-                    train_output_matFE, train_forces, 
-                    #train_output_atomFE, train_output_E_postscale
-                    ],
-                #[train_output_E_postscale, train_forces],
-                #[train_output_E, train_forces],
-                verbose=0)
-        print('model error: ', best_error)
-        sys.stdout.flush()
+                best_error3 = model.evaluate(train_input_coords, 
+                        [
+                            train_output_E_postscale, 
+                            train_forces, 
+                            train_forces, 
+                            train_output_matFE, 
+                            ],
+                        verbose=0)
+                print(l, 'model error train: ', best_error3)
 
+                best_error4 = model.evaluate(test_input_coords, 
+                        [
+                            test_output_E_postscale, 
+                            test_forces, 
+                            test_forces, 
+                            test_output_matFE, 
+                            ],
+                        verbose=0)
+                print(l, 'model error test: ', best_error4)
 
-        #scale_layer_output = Model(inputs=model.input,
-                 #outputs=model.get_layer('scale_layer').output)
+                best_error5 = model.evaluate(input_coords, 
+                        [
+                            output_E_postscale, 
+                            output_F, 
+                            output_F, 
+                            output_matFE, 
+                            ],
+                        verbose=0)
+                print(l, 'model error all: ', best_error5)
 
-        #layer_output = Model(inputs=model.input, 
-                #outputs=model.get_layer('eij_layer').output)
+                model.save_weights('best_ever_model_'+l2)
 
-        angleNRF_layer_output = Model(inputs=model.input, 
-                outputs=model.get_layer('angleNRF_layer').output)
+                #with tf.GradientTape(watch_accessed_variables=False) as tape:
+                    #tape.watch(x)
+                    #y = model(x)[0]
+                #print(l, 'end grads\n', tape.gradient(y, x)) 
+                #print(l, 'end trainable vars\n', model.trainable_variables)
 
+                '''
+                if best_error[0] >= best_error_all:
+                    break
+                if best_error[0] < best_error_all:
+                    model.save_weights('best_ever_model')
+                    best_model = model
+                    best_iteration = l
+                    best_error_all = best_error[0]
+                    print('best model was achieved on layer %d' % l)
+                    print('its error was: {}'.format(best_error_all))
+                '''
+            if time.time()-start_time >= 302400: #3.5 days
+                print('\n*** Time limit reached, ending training ***')
+                break
+            #model.trainable = False
+            #model2 = model(coords_layer)
+            #print(l, 'model2', model2)
+            print()
 
-        #atomNRF_layer_output = Model(inputs=model.input, 
-                #outputs=model.get_layer('atomNRF_layer').output)
+        '''
+        if fit:
+            print('best_iteration', best_iteration)
+            model = best_model #use best model
+            print('training completed\n')
+        '''
 
-        grad_layer_output = Model(inputs=model.input, 
-                outputs=model.get_layer('dE_dx').output)
+        #load_weights = False
+        if load_weights:
+            print('load_weights', load_weights)
+            model.load_weights('../model/best_ever_model_6')
+            #model.load_weights('best_model')
 
-        #triangle_layer_output = Model(inputs=model.input,
-                 #outputs=model.get_layer('triangle_layer').output)
-
-        #atomE_layer_output = Model(inputs=model.input,
-                 #outputs=model.get_layer('atomE_layer').output)
-
-        #scale_atomE_layer_output = Model(inputs=model.input,
-                 #outputs=model.get_layer('scale_atomE_layer').output)
-
-
-        #sum_atomE_layer_output = Model(inputs=model.input,
-                 #outputs=model.get_layer('sum_atomE_layer').output)
-
-
-        for i in range(1): #range(0, len(train2_input_coords), 100): #[0, 1000]: #
-            print('\n', i)
-            prediction = model.predict(
-                    train2_input_coords[i].reshape(1,n_atoms,3))
-            print('prediction\n', prediction)
-            '''
-            E = layer_output.predict(
-                    train2_input_coords[i].reshape(1,n_atoms,3))
-            print('pred\n', E[0])
-            #print('energy\n', train_output_E[i])
-            #E2 = energy_layer_output.predict(
-                    #train_input_coords[i].reshape(1,n_atoms,3))
-            #print('pred postscale\n', E2[0])
-            '''
-
-            NRF_pred = angleNRF_layer_output.predict(
-                    train2_input_coords[i].reshape(1,n_atoms,3))
-            print('NRF_pred\n', NRF_pred)
-            print('NRF\n', train2_input_NRF[i])
-
-
-            print('coords\n', train2_input_coords[i])
-            print('energy\n', train2_output_E_postscale[i])
-
-            print('forces\n', train2_forces[i])
-            grad = grad_layer_output.predict(
-                    train2_input_coords[i].reshape(1,n_atoms,3))
-            print('grad_lambda\n', grad[0])
-            variance, translations, rotations = Network.check_invariance(
-                    train2_input_coords[i], grad[0])
-            print('variance\n', variance, translations, rotations)
-            #print('atomE\n', atomE_layer_output.predict(
-                    #train2_input_coords[i].reshape(1,n_atoms,3)))
-            #print('mat_FE\n', train2_output_matFE[i])
-            #matFE_pred = scale_layer_output.predict(
-                    #train2_input_coords[i].reshape(1,n_atoms,3))[0]
-            #print('pred matFE', matFE_pred)
-            print('E\n', train2_output_E[i])
-            '''
-            triangle = triangle_layer_output.predict(
-                    train2_input_coords[i].reshape(1,n_atoms,3))[0]
-            print('triangle\n', triangle)
-            atomE = np.sum(triangle, axis=0)
-            print('column sums, atomE\n', atomE)
-            print(molecule.atoms)
-            print('sum atomE\n', np.sum(atomE)/2)
-            print('pred mat_FE\n', prediction[2])
-            '''
-
-            '''
-            lower_mask = np.tri(n_atoms,dtype=bool, k=-1)
-            out = np.zeros((n_atoms, n_atoms))
-            out[lower_mask] = prediction[2][0] 
-            out3 = out + out.T
-            print('upper lower triangle\n', out3)
-            atomE = np.sum(out3, axis=0)
-            print('column sums, atomE', atomE)
-            print(molecule.atoms)
-            print('sum atomE', np.sum(atomE)/2)
-            '''
-
-            '''
-            atomE_pred = scale_atomE_layer_output.predict(
-                    train2_input_coords[i].reshape(1,n_atoms,3))[0]
-            #atomE_pred = atomE_layer_output.predict(
-                    #train2_input_coords[i].reshape(1,n_atoms,3))[0]
-            print('pred atomE', atomE_pred)
-            print('sum pred atomE', np.sum(atomE_pred))
-            sum_atomE_pred = sum_atomE_layer_output.predict(
-                    train2_input_coords[i].reshape(1,n_atoms,3))[0]
-            print('pred sum_atomE', sum_atomE_pred)
-            print('train2 atomE', train2_output_atomFE[i])
-            print('sum train2 atomE', np.sum(train2_output_atomFE[i]))
-            '''
-
-            '''
-            print('atomNRF', train2_output_atomNRF[i] / max_atomNRF1)
-            atomNRF_pred = atomNRF_layer_output.predict(
-                    train2_input_coords[i].reshape(1,n_atoms,3))[0]
-            print('model atomNRF', atomNRF_pred)
-            '''
-            
+        if fit:
+            best_error = model.evaluate(train_input_coords, 
+                    [train_output_E_postscale, #train_output_E_postscale, 
+                    train_forces, train_forces,
+                    train_output_matFE],verbose=0)
+            print(l, len(train_input_coords), 'train model error: ', 
+                    best_error)
 
 
 
 
-            '''
-            np_train_input_coords = np.asarray([train_input_coords[i]], 
-                    np.float32)
-            tf_train_input_coords = tf.convert_to_tensor(
-                    np_train_input_coords, np.float32)
-            tf_train_input_coords = tf.Variable(tf_train_input_coords)
-            gradient = tf.gradients(model(tf_train_input_coords)[0], 
-                    tf_train_input_coords, 
-                    unconnected_gradients=tf.UnconnectedGradients.ZERO)
-            #print(model(tf_train_input_coords)[0])
-            with tf.Session() as sess: #to get tensor to numpy
-                sess.run(tf.global_variables_initializer())
-                result_output_scaled = sess.run(gradient[0][0])
-                print('grad\n', result_output_scaled * -1) #-tive grad
+            sys.stdout.flush()
+            #sys.exit()
+
+            #E_layer_output = Model(inputs=model.input, 
+                    #outputs=model.get_layer('eij_matrix_test').output)
+
+            for i in range(3):
+                print('\n\t', i)
+                print('coords\n', train2_input_coords[i])
+                print('energy\n', train2_output_E_postscale[i])
+                print('E\n', train2_output_E[i])
+                print('forces\n', train2_forces[i])
+                prediction = model.predict(
+                        train2_input_coords[i].reshape(1,n_atoms,3)
+                        #train2_input_NRF[i].reshape(1,_NC2)
+                        )
+                print('prediction')
+                for count, p in enumerate(prediction):
+                    print(count, p)
+
+                '''
+                E = layer_output.predict(
+                        train2_input_coords[i].reshape(1,n_atoms,3))
+                print('pred\n', E[0])
+                #print('energy\n', train_output_E[i])
+                #E2 = energy_layer_output.predict(
+                        #train_input_coords[i].reshape(1,n_atoms,3))
+                #print('pred postscale\n', E2[0])
+                '''
+
+                x1 = tf.constant(train2_input_coords[i].reshape(1,n_atoms,3), 
+                        dtype=tf.float32)
+                with tf.GradientTape(watch_accessed_variables=False) as tape2:
+                    tape2.watch(x1)
+                    y = model(x1)[0]
+                gradient1 = tape2.gradient(y, x1) * -1
+                print('tape_grad\n', gradient1) 
+
+                #grad = grad_layer_output.predict(
+                        #train2_input_coords[i].reshape(1,n_atoms,3))
+                #print('grad_lambda\n', grad[0])
                 variance, translations, rotations = Network.check_invariance(
-                        train_input_coords[i], result_output_scaled)
-                print('invariance\n', variance, translations, rotations)
-            '''
+                        train2_input_coords[i], prediction[2][0],
+                        #gradient1[0]
+                        )
+                print('variance\n', variance, translations, rotations)
+                #print('atomE\n', atomE_layer_output.predict(
+                        #train2_input_coords[i].reshape(1,n_atoms,3)))
+                #print('mat_FE\n', train2_output_matFE[i])
+                #matFE_pred = scale_layer_output.predict(
+                        #train2_input_coords[i].reshape(1,n_atoms,3))[0]
+                #print('pred matFE', matFE_pred)
+
+                '''
+                triangle = triangle_layer_output.predict(
+                        train2_input_coords[i].reshape(1,n_atoms,3))[0]
+                print('triangle\n', triangle)
+                atomE = np.sum(triangle, axis=0)
+                print('column sums, atomE\n', atomE)
+                print(molecule.atoms)
+                print('sum atomE\n', np.sum(atomE)/2)
+                print('pred mat_FE\n', prediction[2])
+                '''
+
+                '''
+                lower_mask = np.tri(n_atoms,dtype=bool, k=-1)
+                out = np.zeros((n_atoms, n_atoms))
+                out[lower_mask] = prediction[2][0] 
+                out3 = out + out.T
+                print('upper lower triangle\n', out3)
+                atomE = np.sum(out3, axis=0)
+                print('column sums, atomE', atomE)
+                print(molecule.atoms)
+                print('sum atomE', np.sum(atomE)/2)
+                '''
+
+                '''
+                atomE_pred = scale_atomE_layer_output.predict(
+                        train2_input_coords[i].reshape(1,n_atoms,3))[0]
+                #atomE_pred = atomE_layer_output.predict(
+                        #train2_input_coords[i].reshape(1,n_atoms,3))[0]
+                print('pred atomE', atomE_pred)
+                print('sum pred atomE', np.sum(atomE_pred))
+                sum_atomE_pred = sum_atomE_layer_output.predict(
+                        train2_input_coords[i].reshape(1,n_atoms,3))[0]
+                print('pred sum_atomE', sum_atomE_pred)
+                print('train2 atomE', train2_output_atomFE[i])
+                print('sum train2 atomE', np.sum(train2_output_atomFE[i]))
+                '''
+
+                '''
+                print('atomNRF', train2_output_atomNRF[i] / max_atomNRF1)
+                atomNRF_pred = atomNRF_layer_output.predict(
+                        train2_input_coords[i].reshape(1,n_atoms,3))[0]
+                print('model atomNRF', atomNRF_pred)
+                '''
+                
 
 
 
-        inp_out_pred = False
+
+                '''
+                np_train_input_coords = np.asarray([train_input_coords[i]], 
+                        np.float32)
+                tf_train_input_coords = tf.convert_to_tensor(
+                        np_train_input_coords, np.float32)
+                tf_train_input_coords = tf.Variable(tf_train_input_coords)
+                gradient = tf.gradients(model(tf_train_input_coords)[0], 
+                        tf_train_input_coords, 
+                        unconnected_gradients=tf.UnconnectedGradients.ZERO)
+                #print(model(tf_train_input_coords)[0])
+                with tf.Session() as sess: #to get tensor to numpy
+                    sess.run(tf.global_variables_initializer())
+                    result_output_scaled = sess.run(gradient[0][0])
+                    print('grad\n', result_output_scaled * -1) #-tive grad
+                    variance, translations, rotations = \
+                            Network.check_invariance(
+                            train_input_coords[i], result_output_scaled)
+                    print('invariance\n', variance, translations, rotations)
+                '''
+                sys.stdout.flush()
+
+
+
+        #inp_out_pred = True
         if inp_out_pred:
 
             print('Predict all data')
             prediction = model.predict(input_coords)
             prediction_E = prediction[0].flatten()
-            prediction_F = prediction[1].flatten()
-            prediction_matFE = prediction[2]
+            #prediction_F = prediction[1].flatten()
+            prediction_matFE = prediction[3]
             #prediction_atomFE = prediction[1]
             #prediction_E = prediction[2].flatten()
-            Writer.write_csv([output_E_postscale,
-                prediction_E], 
+
+            x_tensor = tf.constant(input_coords, dtype=tf.float32)
+            with tf.GradientTape(watch_accessed_variables=False) as tape3:
+                tape3.watch(x_tensor)
+                y = model(x_tensor)[0]
+            #prediction_F = tape3.gradient(y, x_tensor).numpy() * -1
+            prediction_F = prediction[2]
+            print(prediction_F.shape)
+            print(prediction_F[0], output_F[0])
+
+
+            Writer.write_csv([output_E_postscale, prediction_E], 
                     'E2', 'actual_E,prediction_E')
 
             atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) for z, n in 
@@ -1367,8 +1405,8 @@ class Network(object):
                     prediction_header
             #header = 'input,output,prediction'
             print(input_NRF.shape)
-            print(output_atomNRF.shape)
-            print(output_atomFE.shape)
+            #print(output_atomNRF.shape)
+            #print(output_atomFE.shape)
             #print(prediction_atomFE.shape)
             print(prediction_E.shape)
             Writer.write_csv([
@@ -1380,6 +1418,7 @@ class Network(object):
                     prediction_matFE
                     ], 'inp_out_pred2', 
                     header)
+            sys.stdout.flush()
 
             mae, rms, msd = Binner.get_error(output_E_postscale.flatten(), 
                     prediction_E.flatten())
@@ -2942,7 +2981,7 @@ class Network(object):
         translations = []
         trans_sum = np.sum(forces,axis=0) #sum columns
         for x in range(3):
-            x_trans_sum = abs(round(trans_sum[x], 0))
+            x_trans_sum = np.abs(np.round(trans_sum[x], 0))
             translations.append(x_trans_sum)
         translations = np.array(translations)
         #rotations

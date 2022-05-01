@@ -49,94 +49,120 @@ def run_force_pred(input_files='input_files',
         input_files = open(list_files).read().split()
 
     print('Load data')
-    train_molecule = Molecule()
-    NPParser(atom_file, [coord_files[0]], [force_files[0]], [], 
-            train_molecule)
-    test_molecule = Molecule()
-    NPParser(atom_file, [coord_files[1]], [force_files[1]], [], test_molecule)
+    dataset_molecule = Molecule()
+    NPParser(atom_file, [coord_files[0]], [force_files[0]], [energy_files[0]], 
+            dataset_molecule)
+    print('dataset', dataset_molecule.coords.shape, 
+            dataset_molecule.forces.shape, dataset_molecule.energies.shape)
 
-    mlff_molecule = Molecule()
-    mlff2_molecule = Molecule()
-    XYZParser(atom_file, [coord_files[2]], [], [], mlff2_molecule)
-    NPParser(atom_file, [], [force_files[2]], [energy_files[0]], 
-            mlff_molecule)
-    mlff_molecule.coords = mlff2_molecule.coords
-    mlff_molecule.forces = mlff_molecule.forces
-    mlff_molecule.energies = mlff_molecule.energies
-    print(mlff_molecule.coords.shape, mlff_molecule.forces.shape, 
-            mlff_molecule.energies.shape)
+    model_molecule = Molecule()
+    NPParser(atom_file, [coord_files[1]], [force_files[1]], [energy_files[1]], 
+            model_molecule)
+    print('model', model_molecule.coords.shape, model_molecule.forces.shape, 
+            model_molecule.energies.shape)
 
-    gaff_molecule = Molecule()
-    gaff2_molecule = Molecule()
-    XYZParser(atom_file, [coord_files[3]], [], [], gaff2_molecule)
-    NPParser(atom_file, [], [force_files[3]], [energy_files[1]], 
-            gaff_molecule)
-    gaff_molecule.coords = gaff2_molecule.coords
+    #'''
+    trucate_model = 1576 # 7 1644 #5 2667 #3 2757 #2 3138 #4 
+    model_molecule.coords = model_molecule.coords[:trucate_model]
+    model_molecule.forces = model_molecule.forces[:trucate_model]
+    model_molecule.energies = model_molecule.energies[:trucate_model]
+    #'''
 
     print(datetime.now() - startTime)
     sys.stdout.flush()
 
+    pairs = []
+    for i in range(len(model_molecule.atoms)):
+        for j in range(i):
+            pairs.append([i, j])
+    model_interatomic_measures = Binner()
+    model_interatomic_measures.get_bond_pop(model_molecule.coords, pairs)
+    ###get pairwise forces
+    mm_molecule = Molecule()
+    NPParser(atom_file, [coord_files[1]], [force_files[2]], [], mm_molecule)
+    mm_molecule.coords = mm_molecule.coords[:trucate_model]
+    mm_molecule.forces = mm_molecule.forces[:trucate_model]
+    Converter(model_molecule)
+    Converter(mm_molecule)
+    print(model_molecule.mat_F.shape)
+    print(mm_molecule.mat_F.shape)
+    n_model = range(0, len(model_molecule.coords))
+    model_OO = model_molecule.mat_F[:,9]
+    mm_OO = mm_molecule.mat_F[:,9]
+    Plotter.xy_scatter(
+            #[n_model, n_model], 
+            [model_interatomic_measures.rs.T[9].flatten(), 
+                model_interatomic_measures.rs.T[9].flatten()],
+            [model_OO, mm_OO],
+            ['model_OO', 'mm_OO'],
+            ['k', 'r'], 'rOO', 'qOO', [1, 1],
+            'scatter-OO.png')
+
+    sys.exit()
+
+    '''
     #time = np.array(list(range(0, 20000))) * 0.0005 #10ps
     time = np.array(list(range(0, 60000000, 10000))) * 0.0000005 + 2 #30ns
-    dE = mlff_molecule.energies.flatten()[480:]
+    dE = model_molecule.energies.flatten()[480:]
     print(len(time), len(dE))
     info = [[time, dE, 'MLFF', r'$\Delta E$ / kcal/mol', 1, 'dE'],
             ]
     for i in info:
         Plotter.xy_scatter([i[0]], [i[1]], [i[2]], ['k'], 'time / ns', 
                 i[3], [i[4]], 'scatter-{}.png'.format(i[5]))
+    '''
 
     #ismaeel's malonaldehye
+    #dihedrals = [[4,0,1,2], [0,1,2,3]] #both OCCC dihs
+    #revised MD17 model
     dihedrals = [[4,0,1,2], [0,1,2,3]] #both OCCC dihs
-    mlff_measures = Binner()
-    mlff_measures.get_dih_pop(mlff_molecule.coords[480:], dihedrals)
-    train_measures = Binner()
-    train_measures.get_dih_pop(train_molecule.coords[::10], dihedrals)
+    model_measures = Binner()
+    model_measures.get_dih_pop(model_molecule.coords, dihedrals)
+    dataset_measures = Binner()
+    dataset_measures.get_dih_pop(dataset_molecule.coords[::10], dihedrals)
+
+    n_dataset = range(0, len(dataset_molecule.coords[::10]))
+    n_model = range(0, len(model_molecule.coords))
+    Plotter.xy_scatter([n_dataset, n_model, n_dataset, n_model], 
+            [dataset_measures.phis.T[0], model_measures.phis.T[0], 
+            dataset_measures.phis.T[1], model_measures.phis.T[1]],
+            ['dataset $\zeta_1$', 'model $\zeta_1$', 'dataset $\zeta_2$', 
+            'model $\zeta_2$'],
+            ['k', 'grey', 'r', 'orange'], 'step', '$\zeta_x$ (deg)', [1]*4,
+            'scatter-step-dihs.png')
 
 
-    '''
-    train_2dhist, yedges, xedges  = np.histogram2d(train_measures.phis.T[0], 
-            train_measures.phis.T[1], bins=360, normed=True)
-    train_2dhist = train_2dhist.T #get axes right way
-    np.savetxt('train_2dhist.txt', train_2dhist)
-    mlff_2dhist, yedges, xedges  = np.histogram2d(mlff_measures.phis.T[0], 
-            mlff_measures.phis.T[1], bins=360, normed=True)
-    mlff_2dhist = mlff_2dhist.T #transpose to get axes right way
-    np.savetxt('mlff_2dhist.txt', mlff_2dhist)
-    '''
-
-
-    Plotter.xy_scatter([train_measures.phis.T[0], 
-            mlff_measures.phis.T[0]], 
-            [train_measures.phis.T[1], mlff_measures.phis.T[1]], 
+    Plotter.xy_scatter([dataset_measures.phis.T[0], 
+            model_measures.phis.T[0]], 
+            [dataset_measures.phis.T[1], model_measures.phis.T[1]], 
             ['MD17', 'MLFF'], ['k', 'r'], '$\zeta_1$ (deg)', 
             '$\zeta_2$ (deg)', [1, 5],
-            'dihs-dataset-mlff.png')
+            'dihs-dataset-model.png')
 
-    Plotter.xy_scatter([train_measures.phis.T[0]], 
-            [train_measures.phis.T[1]], 
+    Plotter.xy_scatter([dataset_measures.phis.T[0]], 
+            [dataset_measures.phis.T[1]], 
             ['MD17'], ['k'], '$\zeta_1$ (deg)', '$\zeta_2$ (deg)', [1], 
             'dihs-dataset.png')
 
-    Plotter.xy_scatter([mlff_measures.phis.T[0]], 
-            [mlff_measures.phis.T[1]], 
+    Plotter.xy_scatter([model_measures.phis.T[0]], 
+            [model_measures.phis.T[1]], 
             ['MLFF'], ['r'], '$\zeta_1$ (deg)', '$\zeta_2$ (deg)', [5], 
-            'dihs-mlff.png')
+            'dihs-model.png')
 
-    Plotter.hist_2d([train_measures.phis.T[0], mlff_measures.phis.T[0]], 
-            [train_measures.phis.T[1], mlff_measures.phis.T[1]], 
+    Plotter.hist_2d([dataset_measures.phis.T[0], model_measures.phis.T[0]], 
+            [dataset_measures.phis.T[1], model_measures.phis.T[1]], 
             ['Greys', 'Reds'], '$\zeta_1$ (deg)', '$\zeta_2$ (deg)', 
-            'hist2d-dihs-dataset-mlff.png')
+            'hist2d-dihs-dataset-model.png')
 
-    Plotter.hist_2d([train_measures.phis.T[0]], 
-            [train_measures.phis.T[1]], 
+    Plotter.hist_2d([dataset_measures.phis.T[0]], 
+            [dataset_measures.phis.T[1]], 
             ['Greys'], '$\zeta_1$ (deg)', '$\zeta_2$ (deg)', 
             'hist2d-dihs-dataset.png')
 
-    Plotter.hist_2d([mlff_measures.phis.T[0]], 
-            [mlff_measures.phis.T[1]], 
+    Plotter.hist_2d([model_measures.phis.T[0]], 
+            [model_measures.phis.T[1]], 
             ['Reds'], '$\zeta_1$ (deg)', '$\zeta_2$ (deg)', 
-            'hist2d-dihs-mlff.png')
+            'hist2d-dihs-model.png')
 
 
 
@@ -146,8 +172,8 @@ def run_force_pred(input_files='input_files',
     '''
 
     print('CCCCCCCCCOOOOHHHHHHHH')
-    A = Molecule.find_bonded_atoms(mlff_molecule.atoms, 
-            mlff_molecule.coords[0])
+    A = Molecule.find_bonded_atoms(model_molecule.atoms, 
+            model_molecule.coords[0])
     print(A)
 
     print(datetime.now() - startTime)
@@ -160,25 +186,25 @@ def run_force_pred(input_files='input_files',
     angles = [[5,6,12], [6,5,7]] #CCO, CCC
     bonds = [[12,6]] #CC
 
-    mlff_measures = Binner()
-    mlff_measures.get_dih_pop(mlff_molecule.coords, dihedrals)
-    mlff_measures.get_angle_pop(mlff_molecule.coords, angles)
-    mlff_measures.get_bond_pop(mlff_molecule.coords, bonds)
+    model_measures = Binner()
+    model_measures.get_dih_pop(model_molecule.coords, dihedrals)
+    model_measures.get_angle_pop(model_molecule.coords, angles)
+    model_measures.get_bond_pop(model_molecule.coords, bonds)
 
     gaff_measures = Binner()
     gaff_measures.get_dih_pop(gaff_molecule.coords, dihedrals)
     gaff_measures.get_angle_pop(gaff_molecule.coords, angles)
     gaff_measures.get_bond_pop(gaff_molecule.coords, bonds)
 
-    Plotter.xy_scatter([mlff_measures.phis.T[0]], [mlff_measures.phis.T[1]], 
-            ['mlff'], ['k'], 'CCOC dih', 'CCCO dih', 2, 'dihs-mlff.png')
+    Plotter.xy_scatter([model_measures.phis.T[0]], [model_measures.phis.T[1]], 
+            ['model'], ['k'], 'CCOC dih', 'CCCO dih', 2, 'dihs-model.png')
     Plotter.xy_scatter([gaff_measures.phis.T[0]], [gaff_measures.phis.T[1]], 
             ['gaff'], ['k'], 'CCOC dih', 'CCCO dih', 2, 'dihs-gaff.png')
     '''
 
     '''
-    Plotter.hist_2d(mlff_measures.phis.T[0], mlff_measures.phis.T[1], 
-            'CCOC', 'CCCO', 'hist2d-mlff-dihs.png')
+    Plotter.hist_2d(model_measures.phis.T[0], model_measures.phis.T[1], 
+            'CCOC', 'CCCO', 'hist2d-model-dihs.png')
     Plotter.hist_2d(gaff_measures.phis.T[0], gaff_measures.phis.T[1], 
             'CCOC', 'CCCO', 'hist2d-gaff-dihs.png')
     '''
@@ -188,65 +214,26 @@ def run_force_pred(input_files='input_files',
     sys.stdout.flush()
 
     pairs = []
-    for i in range(len(mlff_molecule.atoms)):
+    for i in range(len(model_molecule.atoms)):
         for j in range(i):
             pairs.append([i, j])
 
-    mlff_interatomic_measures = Binner()
-    mlff_interatomic_measures.get_bond_pop(mlff_molecule.coords, pairs)
+    model_interatomic_measures = Binner()
+    model_interatomic_measures.get_bond_pop(model_molecule.coords, pairs)
 
-    #gaff_interatomic_measures = Binner()
-    #gaff_interatomic_measures.get_bond_pop(gaff_molecule.coords, pairs)
 
-    train_interatomic_measures = Binner()
-    train_interatomic_measures.get_bond_pop(train_molecule.coords[::10], 
+    dataset_interatomic_measures = Binner()
+    dataset_interatomic_measures.get_bond_pop(dataset_molecule.coords[::10], 
             pairs)
 
-    '''
-    info = [
-            [mlff_molecule.energies, gaff_molecule.energies, 100, 'dE'],
-            [mlff_measures.phis.T[0], gaff_measures.phis.T[0], 180, 'CCOC'],
-            [mlff_measures.phis.T[1], gaff_measures.phis.T[1], 180, 'CCCO'],
-            [mlff_measures.phis.T[2], gaff_measures.phis.T[2], 180, 'OCCC'],
-            [mlff_measures.thetas.T[0], gaff_measures.thetas.T[0], 180, 
-                'CCO'],
-            [mlff_measures.thetas.T[1], gaff_measures.thetas.T[1], 180, 
-                'CCC'],
-            [mlff_measures.rs.T[0], gaff_measures.rs.T[0], 100, 'CC'],
-            [mlff_interatomic_measures.rs.T.flatten(), 
-                gaff_interatomic_measures.rs.T.flatten(), 1000, 
-                'r']
-            ]
-
-    for i in info:
-        bin_edges, hist = Binner.get_hist(i[0], i[2])
-        bin_edges2, hist2 = Binner.get_hist(i[1], i[2])
-        Plotter.xy_scatter([bin_edges, bin_edges2], [hist, hist2], 
-                ['MLFF', 'GAFF'], ['k', 'b'], i[3], 'probability', 40,
-                'hist-mlff-gaff-{}.png'.format(i[3]))
-
-    print(datetime.now() - startTime)
-    sys.stdout.flush()
 
 
-    info = [[time, mlff_molecule.energies, 'MLFF', r'$\Delta E$ / kcal/mol', 10, 'mlff-dE'],
-            [time, gaff_molecule.energies, 'GAFF', r'$\Delta E$ / kcal/mol', 10, 'gaff-dE'],
-            [time, mlff_measures.rs.T[0], 'MLFF', r'CC $r / \AA$', 10, 'CC'],
-            [time, mlff_measures.phis.T[1], 'MLFF', r'CCCO $\Phi$', 10, 'CCCO'],
-            ]
-
-    for i in info:
-        Plotter.xy_scatter([i[0]], [i[1]], [i[2]], ['k'], 'time / ps', 
-                i[3], i[4], 'scatter-{}.png'.format(i[5]))
-
-
-    print(datetime.now() - startTime)
-    sys.stdout.flush()
-    '''
-
-    info = [[mlff_interatomic_measures.rs.T.flatten(), 
-                train_interatomic_measures.rs.T.flatten(), 1000, 
-                '$r_{ij}/ \AA$']
+    info = [[model_interatomic_measures.rs.T.flatten(), 
+                dataset_interatomic_measures.rs.T.flatten(), 1000, 
+                '$r_{ij}/ \AA$', 'all'],
+            [model_interatomic_measures.rs.T[9].flatten(), 
+                dataset_interatomic_measures.rs.T[9].flatten(), 200, 
+                '$r_{ij}/ \AA$', '4-3']
             ]
 
     for i in info:
@@ -254,7 +241,17 @@ def run_force_pred(input_files='input_files',
         bin_edges2, hist2 = Binner.get_hist(i[1], i[2])
         Plotter.xy_scatter([bin_edges2, bin_edges], [hist2, hist], 
                 ['MD17', 'MLFF'], ['k', 'r'], i[3], 'P($r_{ij}$)', [10, 10],
-                'hist-mlff-md17-train-r.png')
+                'hist-model-dataset-r-{}.png'.format(i[4]))
+
+
+    Plotter.xy_scatter([n_model], 
+            [model_interatomic_measures.rs.T[9].flatten()],
+            ['model $r_{OO}$'],
+            ['k'], 'step', '$r_{OO}$', [1],
+            'scatter-step-rOO.png')
+
+
+
 
     print('end')
     print(datetime.now() - startTime)

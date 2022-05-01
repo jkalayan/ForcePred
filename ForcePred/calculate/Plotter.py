@@ -8,6 +8,7 @@ sampled configurations are.
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import matplotlib.colors as colors
 
 class Plotter(object):
     '''
@@ -34,13 +35,17 @@ class Plotter(object):
         for axis in ['top', 'bottom', 'left', 'right']:
             ax.spines[axis].set_linewidth(3)
         ### axes limits
-        #ax.set_xlim(np.min(x)-3, np.max(x)+3)
-        #ax.set_ylim(np.min(y)-3, np.max(y)+3)
+        #ax.set_xlim(np.min(x), np.max(x))
+        #ax.set_ylim(np.min(y), np.max(y))
         #ax.set_ylim(0, 103)
+        #ax.set_ylim(-180, 180)
+        #ax.set_xlim(-180, 180)
+
         ### fix aspect ratio as square
-        x0,x1 = ax.get_xlim()
-        y0,y1 = ax.get_ylim()
-        ax.set_aspect(abs(x1-x0)/abs(y1-y0))
+        #x0,x1 = ax.get_xlim()
+        #y0,y1 = ax.get_ylim()
+        #ax.set_aspect(abs(x1-x0)/abs(y1-y0))
+        ax.set_aspect('auto') #newer matplotlib version
 
     def colorbar(fig, ax, sc, zlabel):
         cbar = fig.colorbar(sc,ax=ax, 
@@ -120,28 +125,52 @@ class Plotter(object):
                 )
         plt.close(plt.gcf())
 
-    def hist_2d(x, y, xlabel, ylabel, plot_name):
+    def hist_2d(x_list, y_list, cmap_list, xlabel, ylabel, 
+            plot_name):
         fig, ax = plt.subplots(figsize=(10, 10), 
                 edgecolor='k') #all in one plot
-        x_min, x_max = np.min(x), np.max(x)
-        x_diff = int(x_max-x_min)
-        y_min, y_max = np.min(y), np.max(y)
-        y_diff = int(y_max-y_min)
-        sc = ax.hist2d(x=x, y=y, bins=[x_diff, y_diff], 
-                range=[[x_min, x_max], [y_min, y_max]], 
-                alpha=1, 
-                #marker='s', 
-                #s=17, edgecolor='k', linewidth=0.1,
-                #cmap=plt.cm.get_cmap('copper_r', 500),
-                #cmap=plt.cm.get_cmap('gist_heat_r', 500),
-                #cmap=plt.cm.get_cmap('jet', 500),
-                #cmap=plt.cm.get_cmap('binary', 500),
-                cmap=plt.cm.get_cmap('viridis', 500),
-                #vmin=cm_min, vmax=cm_max
-                )
+
+        for x, y, cmap in zip(x_list, y_list, cmap_list):
+            x_min, x_max = np.min(x), np.max(x)
+            x_diff = int(x_max-x_min)
+            y_min, y_max = np.min(y), np.max(y)
+            y_diff = int(y_max-y_min)
+
+            def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
+                new_cmap = colors.LinearSegmentedColormap.from_list(
+                        'trunc({n},{a:.2f},{b:.2f})'.format(
+                        n=cmap.name, a=minval, b=maxval),
+                        cmap(np.linspace(minval, maxval, n)))
+                return new_cmap
+
+            #my_cmap = plt.cm.get_cmap(cmap, 180)
+            my_cmap = plt.cm.get_cmap(cmap)
+            my_cmap = truncate_colormap(my_cmap, 0.3, 1)
+            my_cmap.set_under(color='white', alpha='0') 
+                    #set smaller values transparent
+            #my_cmap.set_under((1, 1, 1, 0))
+
+            sc = ax.hist2d(x=x, y=y,
+                    bins=90,
+                    #bins=[x_diff, y_diff], 
+                    range=[[x_min, x_max], [y_min, y_max]], 
+                    alpha=1, 
+                    #marker='s', 
+                    #s=17, edgecolor='k', linewidth=0.1,
+                    #cmap=plt.cm.get_cmap('copper_r', 500),
+                    #cmap=plt.cm.get_cmap('gist_heat_r', 500),
+                    #cmap=plt.cm.get_cmap('jet', 500),
+                    #cmap=plt.cm.get_cmap('binary', 500),
+                    #cmap=plt.cm.get_cmap('viridis', 500),
+                    #cmap=plt.cm.get_cmap(cmap, 500),
+                    cmap=my_cmap,
+                    cmin=0.1,
+                    #vmin=0.5, vmax=1,
+                    #vmin=cm_min, vmax=cm_max,
+                    )
         Plotter.format(ax, x, y, xlabel, ylabel)
         fig.savefig('%s' % (plot_name), 
-                transparent=True, 
+                #transparent=True, 
                 bbox_inches='tight'
                 )
         plt.close(plt.gcf())
@@ -153,8 +182,8 @@ class Plotter(object):
         for x, y, label in zip(x_list, y_list, label_list):
             line = ax.plot(x, y, lw=3, label=label)
             lines.append(line)
-        ax.set_xscale('log')
         Plotter.format(ax, x, y, xlabel, ylabel)
+        ax.set_xscale('log')
         ax.xaxis.set_tick_params(direction='in', which='both')
         ax.yaxis.set_tick_params(direction='in', which='both')
         #lgd = Plotter.get_legend(ax, lines, label_list)
@@ -164,21 +193,22 @@ class Plotter(object):
                 prop={'size': Plotter.tick_labels+4})
         lgd.get_frame().set_alpha(0)
         fig.savefig('%s' % (plot_name), 
-                transparent=True,
+                #transparent=True,
                 #bbox_extra_artists=(lgd,),
                 bbox_inches='tight',
                 )
         plt.close(plt.gcf())
 
     def xy_scatter(x_list, y_list, label_list, color_list, 
-            xlabel, ylabel, size, plot_name):
+            xlabel, ylabel, size_list, plot_name):
         fig, ax = plt.subplots(figsize=(10, 10), 
                 edgecolor='k') #all in one plot
         lines = []
-        for x, y, label, c in zip(x_list, y_list, label_list, color_list):
+        for x, y, size, label, c in zip(x_list, y_list, size_list, 
+                label_list, color_list):
             line = ax.scatter(x, y, label=label, 
-                    s=size, facecolors='none', 
-                    edgecolors=c, lw=2,
+                    s=size, facecolors=c, #'none', 
+                    edgecolors=c, #lw=2,
                     )
             lines.append(line)
         Plotter.format(ax, x, y, xlabel, ylabel)
@@ -187,7 +217,7 @@ class Plotter(object):
                 prop={'size': Plotter.tick_labels+4})
         lgd.get_frame().set_alpha(0)
         fig.savefig('%s' % (plot_name), 
-                transparent=True,
+                #transparent=True,
                 #bbox_extra_artists=(lgd,),
                 bbox_inches='tight',
                 )

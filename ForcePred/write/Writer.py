@@ -59,7 +59,7 @@ class Writer(object):
     
     def write_csv(list_, filename, header):
         np.savetxt('{}.csv'.format(filename), np.column_stack(list_), 
-                delimiter=',', header=header, fmt='%.3f')
+                delimiter=',', header=header, fmt='%.6f')
 
     def write_amber_inpcrd(coords, filename):
         natoms = len(coords)

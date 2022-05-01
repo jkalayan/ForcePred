@@ -132,6 +132,7 @@ class Binner(object):
         msd = msd / _N
         return mae, rms, msd
 
+
     def get_each_error(actual, prediction):
         '''Get RMS and MAE for each array'''
         diff = prediction - actual
