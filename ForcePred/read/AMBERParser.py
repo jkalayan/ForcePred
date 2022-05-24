@@ -40,7 +40,7 @@ class AMBERParser(object):
                 self.forces.shape))
 
     def read_files(self):
-        Z_ = {'H':1, 'C':6, 'O':8}
+        Z_ = {'H':1, 'C':6, 'O':8, 'N':7}
         '''
         read_coords = Universe(self.amb_top, self.amb_coords, format='TRJ')
         read_forces = Universe(self.amb_top, self.amb_forces, format='TRJ')
@@ -53,10 +53,13 @@ class AMBERParser(object):
 
         topology = Universe(self.amb_top, self.amb_coords[0], format='TRJ')
         self.atoms = [Z_[tp.name[0]] for tp in topology.atoms]
+        #print(self.atoms)
 
         for _C, _F in zip(self.amb_coords, self.amb_forces):
             read_coords = Universe(self.amb_top, _C, format='TRJ')
             read_forces = Universe(self.amb_top, _F, format='TRJ')
+            #print(len(read_coords.trajectory))
+            #print(len(read_forces.trajectory))
 
             self.n_all_atoms += len(read_coords.trajectory)
             n_atoms = self.n_all_atoms

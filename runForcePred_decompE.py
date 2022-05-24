@@ -33,12 +33,23 @@ from keras.models import Model, load_model
 from keras import backend as K                                              
 import sys
 import tensorflow as tf
+#tf.compat.v1.disable_eager_execution()
 
 #import numpy as np
 #from itertools import islice
 
-#import os
+import os
 #os.environ['OMP_NUM_THREADS'] = '8'
+
+# Get number of cores reserved by the batch system
+# ($NSLOTS is set by the batch system, or use 1 otherwise)
+NUMCORES=int(os.getenv('NSLOTS', 1))
+print('Using', NUMCORES, 'core(s)' )
+
+
+tf.config.threading.set_inter_op_parallelism_threads(NUMCORES) 
+tf.config.threading.set_intra_op_parallelism_threads(NUMCORES)
+tf.config.set_soft_device_placement(1)
 
 
 def run_force_pred(input_files='input_files', 
@@ -54,12 +65,48 @@ def run_force_pred(input_files='input_files',
 
     if list_files:
         input_files = open(list_files).read().split()
-    #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
+    OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
     #OPTParser(input_files, molecule, opt=True) #read in FCEZ for opt
     #AMBERParser('molecules.prmtop', coord_files, force_files, molecule)
     #XYZParser(atom_file, coord_files, force_files, energy_files, molecule)
-    NPParser(atom_file, coord_files, force_files, energy_files, molecule)
+    #NPParser(atom_file, coord_files, force_files, energy_files, molecule)
+    print(molecule)
+    #write pdb file for first frame
+    Writer.write_pdb(molecule.coords[0], 'MOL', 1, molecule.atoms, 
+            'molecule.pdb', 'w')
 
+
+
+    for Rs in range(5):
+        Converter.get_acsf(molecule, Rs)
+
+        atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) for z, n in 
+                zip(molecule.atoms, range(1,len(molecule.atoms)+1))]
+        atom_pairs = []
+        for i in range(len(molecule.atoms)):
+            for j in range(i):
+                atom_pairs.append('{}_{}'.format(atom_names[i], 
+                    atom_names[j]))
+        input_header = ['input_' + s for s in atom_names]
+        input_header = ','.join(input_header)
+        output_header = ['output_' + s for s in atom_pairs]
+        output_header = ','.join(output_header)
+        prediction_header = ['prediction_' + s for s in atom_pairs]
+        prediction_header = ','.join(prediction_header)
+        header = input_header #+ ',' + output_header + ',' + \
+                #prediction_header
+
+        Writer.write_csv([
+                molecule.acsf,
+                #output_atomNRF, 
+                #output_atomFE, 
+                #output_matFE,
+                #prediction_atomFE
+                #prediction_matFE
+                ], 'acsf-{}'.format(Rs), 
+                header)
+
+    sys.exit()
 
     '''
     ##shorten num molecules here:
@@ -71,7 +118,24 @@ def run_force_pred(input_files='input_files',
     '''
 
 
-    #'''
+
+    '''
+    atoms_flat = tf.reshape(atoms_, [-1])
+    Ztypes, idx, count = tf.unique_with_counts(atoms_flat)
+    idx = tf.reshape(idx, shape=tf.shape(atoms_))
+    print('Ztypes', sess.run(Ztypes))
+    print('idx', sess.run(idx))
+    sort_idx = tf.argsort(idx)
+    print('sort_idx', sess.run(sort_idx))
+    print('count', sess.run(count))
+
+    coords = tf.gather(coords, sort_idx, axis=1, batch_dims=-1)
+    atoms_ = tf.gather(atoms_, sort_idx, batch_dims=-1)
+    print('coords', coords.shape, sess.run(coords))
+    print('atoms_', sess.run(atoms_))
+    '''
+
+    '''
     print('\ntensorflow')
     sess = tf.compat.v1.Session()
     coords = np.copy(molecule.coords[0:2])#.reshape(1, n_atoms, 3)
@@ -89,21 +153,7 @@ def run_force_pred(input_files='input_files',
     batch = coords.shape.as_list()[0]
     n_atoms_ = coords.shape.as_list()[1]
 
-    '''
-    atoms_flat = tf.reshape(atoms_, [-1])
-    Ztypes, idx, count = tf.unique_with_counts(atoms_flat)
-    idx = tf.reshape(idx, shape=tf.shape(atoms_))
-    print('Ztypes', sess.run(Ztypes))
-    print('idx', sess.run(idx))
-    sort_idx = tf.argsort(idx)
-    print('sort_idx', sess.run(sort_idx))
-    print('count', sess.run(count))
 
-    coords = tf.gather(coords, sort_idx, axis=1, batch_dims=-1)
-    atoms_ = tf.gather(atoms_, sort_idx, batch_dims=-1)
-    print('coords', coords.shape, sess.run(coords))
-    print('atoms_', sess.run(atoms_))
-    '''
 
     a = tf.expand_dims(coords, 2)
     b = tf.expand_dims(coords, 1)
@@ -156,13 +206,25 @@ def run_force_pred(input_files='input_files',
         all_sum = 0
         for i in range(n_atoms_):
             h = h1[:,i]
-            row2 = A[:,i]
-            #r2 = tf.transpose([row2,]*N_atomTypes)
-            #h2 = r2 * X * tf.reduce_sum(h)
-            #print('h2', sess.run(h2), sess.run(tf.reduce_sum(h2)))
+            #row2 = A[:,i]
+            r2 = tf.reshape(tf.repeat(A[:,n], repeats=[N_atomTypes], axis=0), 
+                    shape=(batch,N_atomTypes,n_atoms_))
+            r2 = tf.transpose(r2, perm=[0,2,1])
+            #print('r2', sess.run(r2))
+            red_h = tf.reduce_sum(h, axis=1)
+            red_h = tf.expand_dims(red_h, axis=1)
+            red_h = tf.expand_dims(red_h, axis=2)
+            h2 = r2 * X * red_h
+
+            #print('h', sess.run(tf.reduce_sum(h, axis=1)))
+            print('h2', sess.run(tf.reduce_sum(h2, axis=1)))
+            #all_sum += tf.reduce_sum(h2, axis=1)
+        #print('all_sum', sess.run(all_sum))
+    '''
 
 
 
+    '''
     print('\nnumpy')
 
     n_atoms = len(molecule.atoms)
@@ -175,6 +237,7 @@ def run_force_pred(input_files='input_files',
     print('indices\n', indices)
     print('pairs_dict\n', pairs_dict)
     print()
+
 
 
     #A = Molecule.find_bonded_atoms(molecule.atoms, molecule.coords[0])
@@ -204,17 +267,19 @@ def run_force_pred(input_files='input_files',
         all_sum = 0
         for i in range(len(h1)):
             h = h1[i]
-            print('h', h)
+            #print('h', h)
             is_zero = np.all(h == 0)
-            print('is_zero', is_zero)
+            #print('is_zero', is_zero)
             #if is_zero == False:
             row2 = A[i]
             r2 = np.transpose(np.array([row2,]*N_atomTypes))
-            h2 = r2 * X * np.sum(h)
-            print('h2', h2, np.sum(h2, axis=0))
+            #print('r2', r2)
+            h2 = r2 * X #* np.sum(h)
+            #print('h', np.sum(h))
+            print('h2', np.sum(h2, axis=0))
             all_sum += np.sum(h2, axis=0)
-            print()
-        print('all_sum', all_sum)
+            #print()
+        #print('all_sum', all_sum)
         cross = np.cross(sum1, all_sum.T) * X[n] #Z_types[n] #amended here
         E.append(cross)
     E = np.array(E)
@@ -234,12 +299,12 @@ def run_force_pred(input_files='input_files',
             pairs_dict[pair].append(_N)
 
     print(indices, '\n', pairs_dict)
-
+    '''
 
 
     print(datetime.now() - startTime)
     sys.stdout.flush()
-    sys.exit()
+    #sys.exit()
     #'''
 
     print(molecule)
@@ -278,6 +343,11 @@ def run_force_pred(input_files='input_files',
 
     train_forces = np.take(molecule.forces, molecule.train, axis=0)
     train_energies = np.take(molecule.energies, molecule.train, axis=0)
+
+    ###!!!!!!!!
+    #print('!!!TRAIN OVER-RIDDEN FRO SCALING')
+    #train_forces = molecule.forces
+    #train_energies = molecule.energies
 
     forces_min = np.min(molecule.forces)
     forces_max = np.max(molecule.forces)
@@ -394,7 +464,7 @@ def run_force_pred(input_files='input_files',
         #sys.exit()
 
     get_decompE = False
-    bias_type = '1/r' #'1/r' # 'NRF' #
+    bias_type = '1/r' # 'NRF' #'qq/r2' # 
     print('\nenergy bias type: {}'.format(bias_type))
     if get_decompE:
         print('\nget mat_E')
@@ -467,6 +537,7 @@ def run_force_pred(input_files='input_files',
                 'rot-coords.xyz', 'a', 2)
         '''
 
+        '''
         #check angleNRF
         coords = molecule.coords[0].reshape(n_atoms, 3)
         atoms = np.ones(n_atoms).reshape(n_atoms, 1)
@@ -516,7 +587,11 @@ def run_force_pred(input_files='input_files',
                 #print(NRF, cos_theta)
                 angleNRF = cos_theta * NRF
                 #print(angleNRF)
+        '''
 
+
+
+        '''
         atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) for z, n in 
                 zip(molecule.atoms, range(1,len(molecule.atoms)+1))]
         atom_pairs = []
@@ -532,6 +607,7 @@ def run_force_pred(input_files='input_files',
         prediction_header = ','.join(prediction_header)
         header = input_header #+ ',' + output_header + ',' + \
                 #prediction_header
+
         Writer.write_csv([
                 molecule.mat_NRF,
                 #output_atomNRF, 
@@ -541,6 +617,22 @@ def run_force_pred(input_files='input_files',
                 #prediction_matFE
                 ], 'inp', 
                 header)
+
+
+
+        for k in range(3):
+            Writer.write_csv([
+                    #molecule.mat_NRF,
+                    molecule.vector_NRF[:,k,],
+                    #output_atomNRF, 
+                    #output_atomFE, 
+                    #output_matFE,
+                    #prediction_atomFE
+                    #prediction_matFE
+                    ], 'inp{}'.format(k), 
+                    header)
+        '''
+        #sys.exit()
 
 
 
@@ -676,9 +768,18 @@ def run_force_pred(input_files='input_files',
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms*(n_atoms-1)/2)
 
-        coords = molecule.coords[0:5].reshape(-1, n_atoms, 3)
-        F = molecule.forces[0:5].reshape(-1, n_atoms, 3)
-        E = molecule.energies[0:5].reshape(-1, 1)
+        atoms_flat = []
+        for i in range(n_atoms):
+            for j in range(i):
+                ij = molecule.atoms[i] * molecule.atoms[j]
+                atoms_flat.append(ij)
+        atoms_flat = tf.convert_to_tensor(atoms_flat, dtype=tf.float32) #_NC2
+
+
+
+        coords = molecule.coords[0:3].reshape(-1, n_atoms, 3)
+        F = molecule.forces[0:3].reshape(-1, n_atoms, 3)
+        E = molecule.energies[0:3].reshape(-1, 1)
         coords = tf.convert_to_tensor(coords, np.float32)
         F = tf.convert_to_tensor(F, np.float32)
         E = tf.convert_to_tensor(E, np.float32)
@@ -692,6 +793,7 @@ def run_force_pred(input_files='input_files',
         F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
         FE = tf.concat([F_reshaped, E], axis=1)
 
+
         a = tf.expand_dims(coords, 2)
         b = tf.expand_dims(coords, 1)
         diff = a - b
@@ -704,9 +806,28 @@ def run_force_pred(input_files='input_files',
                 shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
         r_flat = diff_flat**0.5
 
+        au2kcalmola = 627.5095 * 0.529177
+        au2kcalmola = tf.constant(au2kcalmola, dtype=tf.float32)
+        _NRF = ((atoms_flat) / (r_flat ** 2))
+        print('_NRF', _NRF.shape)
+        print(sess.run(_NRF))
+        print(molecule.mat_NRF[:3])
+
         #FOR ENERGY get energy 1/r_ij eij matrix
         recip_r = 1 / r_flat
-        eij_E = tf.expand_dims(recip_r, 1)
+        recip_r2 = 1 / r_flat ** 2
+        if bias_type == '1/r':
+            eij_E = tf.expand_dims(recip_r, 1)
+        if bias_type == 'qq/r2':
+            eij_E = tf.expand_dims(_NRF, 1)
+        #print('eij_E', sess.run(eij_E))
+        norm_recip_r = tf.reduce_sum(recip_r2, axis=1) ** 0.5
+        norm_recip_r = tf.expand_dims(norm_recip_r, 1)
+        norm_recip_r = tf.expand_dims(norm_recip_r, 2)
+        #print('!!!!!! normalising eij_E with norm(1/R)')
+        #eij_E = eij_E / norm_recip_r
+        #print('norm', sess.run(norm_recip_r))
+        #sys.exit()
 
         #### FOR FORCES
         r = Triangle(r_flat)
@@ -740,6 +861,8 @@ def run_force_pred(input_files='input_files',
                 new_eij_F.append(s)
 
         eij_F = tf.stack(new_eij_F)
+        #eij_F = eij_F * recip_r2
+        #print('!!! 1/r2 bias included to eij_F matrix')
         eij_F = tf.transpose(eij_F, perm=[1,0,2])
         eij_FE = tf.concat([eij_F, eij_E], axis=1)
 
@@ -748,140 +871,56 @@ def run_force_pred(input_files='input_files',
         qs = tf.linalg.matmul(inv_eij, tf.transpose(FE))
         qs = tf.transpose(qs, perm=[1,0,2])
         qs = tf.linalg.diag_part(qs)
-        qs = tf.transpose(qs) * recip_r
+        qs = tf.transpose(qs) #* recip_r
 
         print('qs', qs.shape)
         print(sess.run(qs))
         print()
-        print(molecule.mat_FE[0:5])
+        print(molecule.mat_FE[0:3])
+        print('max_FE', np.max(np.abs(molecule.mat_FE.flatten())))
+
+
+
+        if bias_type == '1/r':
+            Q3 = Triangle(recip_r)
+        if bias_type == 'qq/r2':
+            Q3 = Triangle(_NRF)
+        #Q3 = Triangle(_NRF)
+        #Q3 = Triangle(recip_r)
+        eij_E = tf.expand_dims(Q3, 3)
+        #dot product of
+        qs_tri = Triangle(qs)
+        E2 = tf.einsum('bijk, bij -> bk', eij_E, qs_tri)
+        E_tf = E2/2
+        #'''
+
+        print('E_tf', E_tf.shape)
+        print(sess.run(E_tf))
+        print()
+        print(molecule.energies[0:3])
+
+
+
         print(datetime.now() - startTime)
         #sys.exit()
 
-
-        '''
-        print('tensorflow2')
-        sess = tf.compat.v1.Session()
-        n_atoms = len(molecule.atoms)
-        _NC2 = int(n_atoms*(n_atoms-1)/2)
-
-        coords = molecule.coords#[0:5].reshape(-1, n_atoms, 3)
-        F = molecule.forces#[0:5].reshape(-1, n_atoms, 3)
-        E = molecule.energies#[0:5].reshape(-1, 1)
-        coords = tf.convert_to_tensor(coords, np.float32)
-        F = tf.convert_to_tensor(F, np.float32)
-        E = tf.convert_to_tensor(E, np.float32)
-        F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
-        FE = tf.concat([F_reshaped, E], axis=1)
-        #print('FE', FE.shape)
-
-        a = tf.expand_dims(coords, 2)
-        b = tf.expand_dims(coords, 1)
-        diff = a - b
-        diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
-        #flatten diff2 so that _NC2 values are left
-        tri = tf.linalg.band_part(diff2, -1, 0) #lower
-        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
-        nonzero_values = tf.gather_nd(tri, nonzero_indices)
-        diff_flat = tf.reshape(nonzero_values, 
-                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
-        r_flat = diff_flat**0.5
-
-        #FOR ENERGY get energy 1/r_ij eij matrix
-        recip_r = 1 / r_flat
-        eij_E = tf.expand_dims(recip_r, 1)
-        #print('eij_E', eij_E.shape)
-        #print(sess.run(eij_E))
-
-        #### FOR FORCES
-        r = Triangle(r_flat)
-        r2 = tf.expand_dims(r, 3)
-        eij_F2 = diff / r2
-        eij_F = tf.where(tf.math.is_nan(eij_F2), tf.zeros_like(eij_F2), 
-                eij_F2) #remove nans 
-        #print('eij_F', eij_F.shape)
-        #print(sess.run(eij_F))
-        #print('mat_eij')
-        #for i, x in enumerate(molecule.mat_eij[0]):
-            #print(i, x)
-
-        new_eij_F = []
-        for i in range(n_atoms):
-            for x in range(3):
-                atom_i = eij_F[:,i,:,x]
-                s = []
-                _N = -1
-                count = 0
-                a = [k for k in range(n_atoms) if k != i]
-                for i2 in range(n_atoms):
-                    for j2 in range(i2):
-                        _N += 1
-                        if i2 == i:
-                            s.append(atom_i[:,a[count]])
-                            count += 1
-                        elif j2 == i:
-                            s.append(atom_i[:,a[count]])
-                            count += 1
-                        else:
-                            s.append(tf.zeros_like(atom_i[:,0]))
-                s = tf.stack(s)
-                #print('s', s.shape)
-                #print(sess.run(s))
-                s = tf.transpose(s)
-                #print('s', s.shape)
-                #print(sess.run(s))
-                #sys.exit()
-                new_eij_F.append(s)
-                #print(sess.run(s))
-
-        eij_F = tf.stack(new_eij_F)
-        #eij_F = tf.reshape(tf.stack(new_eij_F), shape=(tf.shape(new_eij_F)[1], 
-                #tf.shape(new_eij_F)[0], tf.shape(new_eij_F)[2]))
-        eij_F = tf.transpose(eij_F, perm=[1,0,2])
-        #print('eij_F', eij_F.shape)
-        #print(sess.run(eij_F))
-        eij_FE = tf.concat([eij_F, eij_E], axis=1) 
-
-
-        shape = eij_FE.shape.as_list()
-
-        #qs = []
-        #for f in range(shape[0]):
-            #inv_eij = tf.linalg.pinv(eij_FE[f])
-            #fe = tf.expand_dims(FE[f], 1)
-            #print('inv_eij', inv_eij.shape)
-            #print('fe', fe.shape)
-            #q = tf.linalg.matmul(inv_eij, fe)
-            #q = tf.squeeze(q)
-            #qs.append(q)
-            #print('q', q.shape)
-            #print(sess.run(q))
-        #qs = tf.stack(qs)
-
-        inv_eij = tf.linalg.pinv(eij_FE)
-        #print('inv_eij', inv_eij.shape)
-        #print(sess.run(inv_eij))
-        qs = tf.linalg.matmul(inv_eij, tf.transpose(FE))
-        qs = tf.transpose(qs, perm=[1,0,2])
-        qs = tf.linalg.diag_part(qs)
-        qs = tf.transpose(qs)
-        print('qs', qs.shape)
-        #print(sess.run(qs))
-        #print()
-        #print(molecule.mat_FE[0:5])
-        print('exit')
-        print(datetime.now() - startTime)
-        sys.exit()
-        '''
 
         '''
         #save to file for Neil
         kj2kcal = 1/4.184
         au2kcalmola = Converter.Eh2kcalmol / Converter.au2Ang
         print(molecule.forces[-1])
-        np.savetxt('matrix_FE.dat', (molecule.mat_FE[-1]/kj2kcal).reshape(-1,_NC2))
-        np.savetxt('F.dat', (molecule.forces[-1]/au2kcalmola).reshape(-1,3))
-        np.savetxt('E.dat', (molecule.energies[-1]/kj2kcal).reshape(-1,1))
-        np.savetxt('matrix_eij.dat', molecule.mat_eij[-1].reshape(-1,_NC2))
+        #np.savetxt('matrix_FE.dat', (molecule.mat_FE[-1]/kj2kcal).reshape(-1,_NC2))
+        #np.savetxt('F.dat', (molecule.forces[-1]/au2kcalmola).reshape(-1,3))
+        #np.savetxt('E.dat', (molecule.energies[-1]/kj2kcal).reshape(-1,1))
+        #np.savetxt('matrix_eij.dat', molecule.mat_eij[-1].reshape(-1,_NC2))
+
+        np.savetxt('q.dat', (molecule.mat_FE[:]).reshape(-1,_NC2))
+        np.savetxt('C.dat', (molecule.coords[:]).reshape(-1,3))
+        np.savetxt('F.dat', (molecule.forces[:]).reshape(-1,3))
+        np.savetxt('E.dat', (molecule.energies[:]).reshape(-1,1))
+        np.savetxt('eij_FE.dat', molecule.mat_eij[:].reshape(-1,_NC2))
+        #sys.exit()
         '''
         for i in range(1):
             print('\ni', i)
@@ -896,16 +935,16 @@ def run_force_pred(input_files='input_files',
             _NC2 = int(n_atoms*(n_atoms-1)/2)
             recompF, recompE = Converter.get_recomposed_FE(
                     [molecule.coords[i]], 
-                    #[molecule.mat_FE[i]], 
-                    [molecule.mat_FE[i] / molecule.mat_eij[i][-1]], #add back bias 
+                    [molecule.mat_FE[i]], 
+                    #[molecule.mat_FE[i] / molecule.mat_eij[i][-1]], #add back bias 
                     molecule.atoms, n_atoms, _NC2, bias_type)
             print('\nrecomp from FE')
             print(recompF)
             print(recompE)
             print('\nrecomp from FE with dot')
-            recompF = np.dot(molecule.mat_eij[i][:-1], molecule.mat_FE[i] / 
-                    molecule.mat_eij[i][-1]) #add back bias
-            #recompF = np.dot(molecule.mat_eij[i][:-1], molecule.mat_FE[i])
+            #recompF = np.dot(molecule.mat_eij[i][:-1], molecule.mat_FE[i] / 
+                    #molecule.mat_eij[i][-1]) #add back bias
+            recompF = np.dot(molecule.mat_eij[i][:-1], molecule.mat_FE[i])
             recompE = np.dot(molecule.mat_bias[i], molecule.mat_FE[i])
 
             print(recompF)
@@ -917,6 +956,8 @@ def run_force_pred(input_files='input_files',
             print(recompF2)
             '''
 
+
+        #'''
         lower_mask = np.tri(n_atoms, dtype=bool, k=-1) #True False mask
         #print(lower_mask)
         out = np.zeros((n_atoms, n_atoms))
@@ -938,8 +979,8 @@ def run_force_pred(input_files='input_files',
             molecule.atomNRF[j] = atomNRF
             if j == 0:
                 print('upper lower triangle ult atomNRF\n', ult)
-        np.savetxt('atomFE.txt', molecule.atomFE)
-        np.savetxt('atomNRF.txt', molecule.atomNRF)
+        #np.savetxt('atomFE.txt', molecule.atomFE)
+        #np.savetxt('atomNRF.txt', molecule.atomNRF)
         print('column sums, molecule.atomFE\n', molecule.atomFE[0])
         out[lower_mask] = molecule.mat_FE[0]
         out3 = out + out.T
@@ -949,9 +990,11 @@ def run_force_pred(input_files='input_files',
         print(molecule.atoms)
         print('sum atomFE', np.sum(atomFE))
         print('atomNRF', molecule.atomNRF[0])
+        #'''
 
         print(datetime.now() - startTime)
         sys.stdout.flush()
+        #sys.exit()
 
     #molecule.mat_FE = molecule.mat_E
     #print('\n!!!!!!!!! *** using mat_E instead of mat_FE *** !!!!!!!!!!!')
@@ -971,7 +1014,7 @@ def run_force_pred(input_files='input_files',
     #'''
     print('\ninternal FE decomposition')
     network = Network(molecule)
-    Network.get_coord_FE_model(network, molecule, prescale)
+    model = Network.get_coord_FE_model(network, molecule, prescale)
     print('exit')
     print(datetime.now() - startTime)
     sys.stdout.flush()

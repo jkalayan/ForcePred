@@ -118,88 +118,7 @@ class CoordsTo_atomNRF(Layer):
         return atomNRF_scaled
 
 
-#class SortAdjacency(Layer):
-    #def __init__(self, **kwargs):
-        #super(SortAdjacency, self).__init__()
 
-
-
-class SortPairs(Layer):
-    def __init__(self, _NC2, **kwargs):
-        super(SortPairs, self).__init__()
-        self._NC2 = _NC2
-
-    def compute_output_shape(self, input_shape):
-        batch_size = input_shape[0]
-        return (batch_size, self._NC2)
-
-    def call(self, pairsDict_NRF):
-        pairsDict, _NRF = pairsDict_NRF
-
-        sorted_NRFs = []
-        #sorted_all_list_N = []
-        for pair, list_N in pairsDict.items():
-            #get NRFs associated with a pair type
-            part_NRF = tf.gather(_NRF, list_N, batch_dims=-1)
-            #sort the part NRFs from smallest to largest 
-            indices = tf.argsort(part_NRF)
-            part_sort = tf.gather(part_NRF, indices, batch_dims=-1)
-            sorted_NRFs.append(part_sort)
-            #get the tiled list_N indices associated with the sorted NRFs
-            #list_N_tile = tf.tile(list_N, [tf.shape(_NRF)[0]])
-            #list_N_tile = tf.reshape(list_N_tile, [tf.shape(_NRF)[0], -1])
-            #list_N2 = tf.gather(list_N_tile, indices, batch_dims=-1)
-            #sorted_all_list_N.append(list_N2)
-
-        #reshape the sorted NRFs to (-1,_NC2)
-        concat_sorted_NRFs = tf.concat(sorted_NRFs, 1)
-        #reshape the sorted list_N indices to (-1,_NC2)
-        #concat_sorted_all_list_N = tf.concat(sorted_all_list_N, 1)
-        #now resort the sorted list_N indices to get back original order
-        #resorted_all_list_N = tf.argsort(concat_sorted_all_list_N) #resort
-        #resorted_NRFs = tf.gather(concat_sorted_NRFs, resorted_all_list_N, 
-                #batch_dims=-1)
-
-        return concat_sorted_NRFs
-
-
-class ResortPairs(Layer):
-    def __init__(self, _NC2, **kwargs):
-        super(ResortPairs, self).__init__()
-        self._NC2 = _NC2
-
-    def compute_output_shape(self, input_shape):
-        batch_size = input_shape[0]
-        return (batch_size, self._NC2)
-
-    def call(self, pairsDict_sortedFE_NRF):
-        pairsDict, sorted_FE, _NRF = pairsDict_sortedFE_NRF
-
-        #sorted_NRFs = []
-        sorted_all_list_N = []
-        for pair, list_N in pairsDict.items():
-            #get NRFs associated with a pair type
-            part_NRF = tf.gather(_NRF, list_N, batch_dims=-1)
-            #sort the part NRFs from smallest to largest 
-            indices = tf.argsort(part_NRF)
-            #part_sort = tf.gather(part_NRF, indices, batch_dims=-1)
-            #sorted_NRFs.append(part_sort)
-            #get the tiled list_N indices associated with the sorted NRFs
-            list_N_tile = tf.tile(list_N, [tf.shape(_NRF)[0]])
-            list_N_tile = tf.reshape(list_N_tile, [tf.shape(_NRF)[0], -1])
-            list_N2 = tf.gather(list_N_tile, indices, batch_dims=-1)
-            sorted_all_list_N.append(list_N2)
-
-        #reshape the sorted NRFs to (-1,_NC2)
-        #concat_sorted_NRFs = tf.concat(sorted_NRFs, 1)
-        #reshape the sorted list_N indices to (-1,_NC2)
-        concat_sorted_all_list_N = tf.concat(sorted_all_list_N, 1)
-        #now resort the sorted list_N indices to get back original order
-        resorted_all_list_N = tf.argsort(concat_sorted_all_list_N) #resort
-        resorted_FE = tf.gather(sorted_FE, resorted_all_list_N, 
-                batch_dims=-1)
-
-        return resorted_FE
 
 
 class SumNRF(Layer):
@@ -272,10 +191,6 @@ class ScaleFE(Layer):
         super(ScaleFE, self).__init__()
         self._NC2 = _NC2
         self.max_FE = max_FE
-        #self.name = name
-
-    #def build(self, input_shape):
-        #self.kernal = self.add_weight('kernel')
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
@@ -292,7 +207,6 @@ class Scale_atomE(Layer):
         super(Scale_atomE, self).__init__()
         self.n_atoms = n_atoms
         self.max_atomE = max_atomE
-        #self.name = name
 
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]

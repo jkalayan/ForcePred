@@ -82,7 +82,7 @@ class Plotter(object):
         Plotter.format(ax, x, y, xlabel, ylabel)
         Plotter.colorbar(fig, ax, sc, zlabel)
         fig.savefig('%s' % (plot_name), 
-                transparent=True, 
+                #transparent=True, 
                 bbox_inches='tight'
                 )
         plt.close(plt.gcf())
@@ -96,7 +96,7 @@ class Plotter(object):
         ax.xaxis.set_tick_params(direction='in', which='both')
         ax.yaxis.set_tick_params(direction='in', which='both')
         fig.savefig('%s' % (plot_name), 
-                transparent=True,
+                #transparent=True,
                 #bbox_extra_artists=(lgd,),
                 bbox_inches='tight',
                 )
@@ -120,7 +120,7 @@ class Plotter(object):
                     )
         Plotter.format(ax, x, x, xlabel, ylabel)
         fig.savefig('%s' % (plot_name), 
-                transparent=True, 
+                #transparent=True, 
                 bbox_inches='tight'
                 )
         plt.close(plt.gcf())

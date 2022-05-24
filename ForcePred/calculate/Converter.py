@@ -6,6 +6,7 @@ into pair-wise and nuclear repulsive forces respectively.
 '''
 
 import numpy as np
+#import sys
 #from ..network.Network import Network
 
 class Converter(object):
@@ -408,10 +409,12 @@ class Converter(object):
         molecule.mat_bias = np.zeros((n_structures, _NC2))
         molecule.mat_FE = np.zeros((n_structures, _NC2))
         molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, _NC2))
+        molecule.vector_NRF = np.zeros((n_structures, 3, _NC2))
         for s in range(n_structures):
             #mat_r = np.zeros((_NC2))
             mat_Fvals = np.zeros((n_atoms, 3, _NC2))
             com = np.sum(molecule.coords[s], axis=0) / n_atoms
+            #vector_NRF = np.zeros((3, _NC2))
             _N = -1
             for i in range(n_atoms):
                 zi = molecule.atoms[i]
@@ -439,6 +442,7 @@ class Converter(object):
                     bias = molecule.mat_NRF[s,_N]
                     if bias_type != 'NRF':
                         bias = Converter.get_bias(zi, zj, r, bias_type)
+                        #bias = r
                         #bias = zi * zj /r**2
                         #if r < rc:
                             #bias = 0.5 * np.cos(np.pi * r / rc) + 0.5
@@ -450,16 +454,24 @@ class Converter(object):
                                 molecule.mat_r[s,_N])
                         #if force_bias:
                             #val *= bias
+                            #val *= 1/ (molecule.mat_r[s,_N] ** 2)
                         mat_Fvals[i,x,_N] = val
                         mat_Fvals[j,x,_N] = -val
                         molecule.mat_eij[s,i*3+x,_N] = val
                         molecule.mat_eij[s,j*3+x,_N] = -val
+                        val2 = ((molecule.coords[s][i][x] - 
+                                molecule.coords[s][j][x]) / 
+                                molecule.mat_r[s,_N] ** 2)
+                        molecule.vector_NRF[s,x,_N] = val2 * zi * zj
 
             mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2)
             forces2 = molecule.forces[s].reshape(n_atoms*3)
             #decomp_F = np.matmul(np.linalg.pinv(mat_Fvals2), forces2)
 
             mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2))
+            #norm_recip_r = np.sum((1 / molecule.mat_r[s]) ** 2) ** 0.5
+            #norm_NRF = np.sum((molecule.mat_NRF[s]) ** 2) ** 0.5
+            #mat_bias2 = mat_bias2 / norm_NRF ###!!!!normalising eij_E
             _E = molecule.energies[s].reshape(1)
             #decomp_E = np.matmul(np.linalg.pinv(mat_bias2), _E)
 
@@ -471,8 +483,11 @@ class Converter(object):
             if s == 0:
                 print('mat_bias\n', molecule.mat_bias[s])
                 print('mat_eij\n', molecule.mat_eij[s])
+                print('bias_type', bias_type)
+                print('decomp_FE', decomp_FE)
+                #print('norm_recip_r', norm_recip_r)
 
-            #'''
+            '''
             #rescale using E bias only, doesn't work for forces
             _N2 = -1
             for i in range(n_atoms):
@@ -482,7 +497,7 @@ class Converter(object):
                     #if force_bias:
                         #decomp_FE[_N2] *= molecule.mat_bias[s,_N2]
                     molecule.mat_bias[s,_N2] = 1
-            #'''
+            '''
 
 
             molecule.mat_FE[s] = decomp_FE
@@ -662,6 +677,92 @@ class Converter(object):
         return recomp 
 
 
+    def get_rbf(molecule):
+        '''
+        '''
+        n_atoms = len(molecule.atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        n_structures = len(molecule.coords)
+        molecule.mat_NRF = np.zeros((n_structures, _NC2))
+        molecule.mat_r = np.zeros((n_structures, _NC2))
+        molecule.vector_NRF = np.zeros((n_structures, 3, _NC2))
+        for s in range(n_structures):
+            _N = -1
+            for i in range(n_atoms):
+                zi = molecule.atoms[i]
+                for j in range(i):
+                    _N += 1
+                    zj = molecule.atoms[j]
+                    r = Converter.get_r(molecule.coords[s][i], 
+                            molecule.coords[s][j])
+                    molecule.mat_r[s,_N] = r
+                    molecule.mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
+                    for x in range(0, 3):
+                        val = ((molecule.coords[s][i][x] - 
+                                molecule.coords[s][j][x]) / 
+                                molecule.mat_r[s,_N])
+                        val2 = ((molecule.coords[s][i][x] - 
+                                molecule.coords[s][j][x]) / 
+                                molecule.mat_r[s,_N] ** 2)
+                        molecule.vector_NRF[s,x,_N] = val2 * zi * zj
+
+
+    def get_acsf(molecule, Rs):
+        '''
+        Get the atom-centred symmetry functions
+        '''
+        n_atoms = len(molecule.atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        n_structures = len(molecule.coords)
+        molecule.mat_qqr2 = np.zeros((n_structures, _NC2))
+        molecule.mat_r = np.zeros((n_structures, _NC2))
+        molecule.acsf = np.zeros((n_structures, n_atoms))
+        molecule.mat_eij_FE = np.zeros((n_structures, n_atoms*3+1, _NC2))
+        molecule.mat_E = np.zeros((n_structures, _NC2))
+        molecule.mat_FE = np.zeros((n_structures, _NC2))
+        for s in range(n_structures):
+            _N = -1
+            for i in range(n_atoms):
+                zi = molecule.atoms[i]
+                for j in range(i):
+                    _N += 1
+                    zj = molecule.atoms[j]
+                    r = Converter.get_r(molecule.coords[s][i], 
+                            molecule.coords[s][j])
+                    qqr2 = zi * zj / (r ** 2)
+                    molecule.mat_r[s,_N] = r
+                    molecule.mat_qqr2[s,_N] = qqr2 
+                    #Rs = 0
+                    Rc = 5
+                    nu = 4
+                    if r < Rc:
+                        fc = 0.5 * np.cos(np.pi * qqr2 / Rc) + 0.5
+                    if r > Rc:
+                        fc = 0
+                    Gij = np.exp(-nu * (r - Rs) ** 2) * Rc
+                    molecule.acsf[s,i] += Gij
+                    molecule.acsf[s,j] += Gij
+                    molecule.mat_eij_FE[s,n_atoms*3,_N] = qqr2
+
+                    for x in range(0, 3):
+                        val = ((molecule.coords[s][i][x] - 
+                                molecule.coords[s][j][x]) / 
+                                molecule.mat_r[s,_N])
+                        molecule.mat_eij_FE[s,i*3+x,_N] = val
+                        molecule.mat_eij_FE[s,j*3+x,_N] = -val
+            eij_E = molecule.mat_qqr2[s].reshape((1,_NC2))
+            E = molecule.energies[s]
+            decomp_E = np.matmul(np.linalg.pinv(eij_E), E)
+            molecule.mat_E[s] = decomp_E
+
+            eij_FE = molecule.mat_eij_FE[s]
+            F = molecule.forces[s]
+            FE = np.concatenate([F.flatten(), E.flatten()])
+            decomp_FE = np.matmul(np.linalg.pinv(eij_FE), FE)
+            molecule.mat_FE[s] = decomp_FE
+
+
+
     def get_bias(zA, zB, r, bias_type):
         bias = 1
         if bias_type == '1/r':
@@ -678,6 +779,8 @@ class Converter(object):
             bias = Converter.get_NRF(zA, zB, r)
         if bias_type == '1/qqr2':
             bias = 1 / zA * zB * Converter.au2kcalmola * r ** 2
+        if bias_type == 'qq/r2':
+            bias = zA * zB / r ** 2
         return bias
 
     def get_NRF(zA, zB, r):

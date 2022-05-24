@@ -45,6 +45,7 @@ class OpenMM(object):
         force = None
 
         if mlmm:
+            pdb_file='../../revised_data/3md.rst.pdb'
             pdb = PDBFile(pdb_file)
             '''
             pdb = PDBFile(pdb_file)
@@ -78,8 +79,8 @@ class OpenMM(object):
                     nonbondedMethod=PME, nonbondedCutoff=0.8*nanometer)
             '''
 
-            prmtop = AmberPrmtopFile('../data/molecules.prmtop')
-            inpcrd = AmberInpcrdFile('../data/molecules.inpcrd')
+            prmtop = AmberPrmtopFile('../../revised_data/molecules.prmtop')
+            inpcrd = AmberInpcrdFile('../../revised_data/molecules.inpcrd')
             mm_system = prmtop.createSystem()
             print(mm_system.getNumParticles())
 
@@ -176,6 +177,7 @@ class OpenMM(object):
 
         if mlff:
             #intial coords need to be in pdb format or amber, gromacs, charmm
+            pdb_file='../../revised_data/molecule.pdb'
             pdb = PDBFile(pdb_file)
             n_atoms = len(pdb.getPositions())
             #create a system of n_atoms with zero intial forces
@@ -224,6 +226,7 @@ class OpenMM(object):
             system.addForce(nb_force)
             '''
 
+        print(system.getDefaultPeriodicBoxVectors())
 
         ## setup simulation conditions
         ts = (0.5*femtoseconds).in_units_of(picoseconds) #1 ps == 1e3 fs
@@ -305,7 +308,9 @@ class OpenMM(object):
         init_forces = simulation.context.getState(
                 getForces=True).getForces(asNumpy=True).in_units_of(
                 kilocalories_per_mole/angstrom) #in kcal/mol/A
-        print('init_forces', init_forces[:n_atoms_model])
+        #print('init_forces', init_forces[:n_atoms_model])
+
+        simulation.reporters.append(DCDReporter('o-trajectory.dcd', 4))
 
         return system, simulation, force, integrator, \
                 init_positions, init_forces
@@ -374,8 +379,8 @@ class OpenMM(object):
 
             if i%(nsteps/saved_steps) == 0:
                 if mlmm:
-                    Writer.write_xyz([positions/angstrom], all_atoms, 
-                            'openmm-coords-all.xyz', 'a', time)
+                    #Writer.write_xyz([positions/angstrom], all_atoms, 
+                            #'openmm-coords-all.xyz', 'a', time)
                     Writer.write_xyz([positions[:n_atoms_model]/angstrom], 
                             all_atoms[:n_atoms_model], 
                             'openmm-coords.xyz', 'a', time)
@@ -434,15 +439,14 @@ class OpenMM(object):
 
         if mlff or mlmm:
             curl = None
-            #'''
             #translate (and rotate if applied) coords back to center
-            #positions = OpenMM.translate_coords(init_coords/angstrom,
-                    #positions/angstrom, atoms)
-            #simulation.context.setPositions(positions*angstrom)
+            if mlff:
+                positions = OpenMM.translate_coords(init_coords/angstrom,
+                        positions/angstrom, atoms)
+                simulation.context.setPositions(positions*angstrom)
             positions = simulation.context.getState(
                     getPositions=True).getPositions(
                     asNumpy=True).in_units_of(angstrom) #in angstrom
-            #'''
 
             ##predict forces here
             if from_FE:
@@ -484,11 +488,13 @@ class OpenMM(object):
                     asNumpy=True).in_units_of(kilocalories_per_mole/angstrom) 
                     #in angstrom
             mm_forces = forces[:n_atoms_model]
+            '''
             print('step', time)
             print('C', positions[:n_atoms_model])
             print('PRED', pred_forces)
             print('MM F', mm_forces)
             print('SUM F', pred_forces + mm_forces)
+            '''
 
             ##update simulation forces
             if mlff:
@@ -569,7 +575,7 @@ class OpenMM(object):
     def predict_force_internal_FE(positions, model):
         '''forces are from gradient of energy'''
         prediction = model.predict(positions.reshape(1,-1,3))
-        forces = prediction[2]
+        forces = prediction[0]#[2]
         return forces, None
 
     def translate_coords(init_coords, coords, atoms):

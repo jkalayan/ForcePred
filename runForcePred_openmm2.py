@@ -22,16 +22,24 @@ if mdanal:
     from ForcePred.read.AMBERParser import AMBERParser
                                
 from ForcePred import Molecule, OPTParser, NPParser, Converter, \
-        Permuter, XYZParser, Binner, Writer, Plotter, Network, Conservation
+        Permuter, XYZParser, Binner, Writer, Plotter, Conservation
+
+#from ForcePred.nn.Network_v2 import Network
+#from ForcePred.nn.Network_atomwise import Network
+from ForcePred.nn.Network_perminv import Network
 
 from keras.models import Model, load_model    
 from keras import backend as K                                              
 import sys
+import tensorflow as tf
 #import numpy as np
 #from itertools import islice
 
-#import os
+import os
 #os.environ['OMP_NUM_THREADS'] = '8'
+
+NUMCORES=int(os.getenv('NSLOTS', 1))
+print('Using', NUMCORES, 'core(s)' )
 
 
 def run_force_pred(input_files='input_files',
@@ -54,12 +62,14 @@ def run_force_pred(input_files='input_files',
     #NPParser(atom_file, [coord_files[1]], [force_files[1]], 
             #[energy_files[1]], molecule2)
 
+    '''
     A = Molecule.find_bonded_atoms(molecule.atoms, molecule.coords[0])
     indices, pairs_dict = Molecule.find_equivalent_atoms(molecule.atoms, A)
     print('\nZ', molecule.atoms)
     print('A', A) 
     print('indices', indices)
     print('pairs_dict', pairs_dict)
+    '''
 
     sys.stdout.flush()
     #sys.exit()
@@ -73,7 +83,7 @@ def run_force_pred(input_files='input_files',
     sys.stdout.flush()
     '''
 
-    pdb_file='../data/3md.rst.pdb'
+    pdb_file='../../revised_data/3md.rst.pdb'
     masses = [Converter._ZM[i] for i in molecule.atoms]
 
     print('\nget MD system')
@@ -100,7 +110,7 @@ def run_force_pred(input_files='input_files',
     print('max F', np.max(np.abs(molecule.forces)))
     if prescale_energies:
         prescale = [0, 1, 0, 1]
-        split = 2 #100 #500 #200 #100
+        split = 100 #500 #200 #100
         train = round(len(molecule.coords) / split, 3)
         print('\nget train and test sets, '\
                 'training set is {} points'.format(train))
@@ -143,10 +153,14 @@ def run_force_pred(input_files='input_files',
     #################################################################
 
     print('\ncheck model predictions')
-    prediction = model.predict(molecule.coords)[2]
+    prediction = model.predict(molecule.coords)[0]
     for c, f in zip(molecule.coords, prediction):
         print('C', c)
         print('FPRED', f)
+        break
+    prediction = model.predict(molecule.coords[0].reshape(1,-1,3))
+    print(prediction)
+
 
 
 

@@ -22,12 +22,16 @@ from ForcePred import Molecule, OPTParser, NPParser, Converter, \
 
 from keras.models import Model, load_model    
 from keras import backend as K                                              
+import tensorflow as tf
 import sys
 #import numpy as np
 #from itertools import islice
 
-#import os
+import os
 #os.environ['OMP_NUM_THREADS'] = '8'
+
+NUMCORES=int(os.getenv('NSLOTS', 1))
+print('Using', NUMCORES, 'core(s)' )
 
 
 def run_force_pred(input_files='input_files',
