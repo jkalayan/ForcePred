@@ -61,6 +61,7 @@ def run_force_pred(input_files='input_files',
     #molecule2 = Molecule() #initiate molecule class
     #NPParser(atom_file, [coord_files[1]], [force_files[1]], 
             #[energy_files[1]], molecule2)
+    print(molecule)
 
     '''
     A = Molecule.find_bonded_atoms(molecule.atoms, molecule.coords[0])
@@ -166,8 +167,8 @@ def run_force_pred(input_files='input_files',
 
 
     print('\nrun MD simulation')
-    nsteps = 200_00#0_000 #100ns #25_000_000 #12.5ns 20000 #10ps
-    saved_steps = nsteps/4#/10000#000#2
+    nsteps = 200_000#_000 #100ns #25_000_000 #12.5ns 20000 #10ps
+    saved_steps = nsteps/40#/10000#000#2
     print('nsteps: {} saved_steps: {}'.format(nsteps, saved_steps))
     #model = load_model('../../best_ever_model')
 

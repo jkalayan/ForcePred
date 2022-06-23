@@ -37,6 +37,7 @@ from ..read.Molecule import Molecule
 from ..calculate.Conservation import Conservation
 import sys
 import time
+import math
 
 start_time = time.time()
 
@@ -118,7 +119,54 @@ class CoordsTo_atomNRF(Layer):
         return atomNRF_scaled
 
 
+class CoordsTo_acsf(Layer):
+    def __init__(self, atoms_flat, n_atoms, max_atomNRF, _NC2, **kwargs):
+        super(CoordsTo_atomNRF, self).__init__()
+        self.atoms_flat = atoms_flat
+        self.n_atoms = n_atoms
+        self.max_atomNRF = max_atomNRF
+        self._NC2 = _NC2
+        self.au2kcalmola = tf.Variable(627.5095 * 0.529177)
+        self.Rc = 5
+        self.nu = 4
+        self.pi = tf.constant(math.pi)
 
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        n_atoms = input_shape[1]
+        #return (batch_size, n_atoms, n_atoms)
+        return (batch_size, n_atoms)
+
+    def call(self, coords):
+        '''
+        get traingle NRF and then sum each row to get atom-wise NRFs
+        '''
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
+        #flatten diff2 so that _NC2 values are left
+        tri = tf.linalg.band_part(diff2, -1, 0) #lower
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        diff_flat = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        r = diff_flat**0.5
+        qqr2 = ((self.atoms_flat) / (r ** 2))
+        triangle_qqr2 = Triangle(self.n_atoms)(qqr2)
+        triangle_r = Triangle(self.n_atoms)(r)
+
+        Rs = 0
+        less_mask = tf.math.less_equal(triangle_r, self.Rc) #Bools inside
+        less_r = triangle_r * tf.cast(less_mask, dtype=tf.float32)
+        fc_all = 0.5 * tf.math.cos(math.pi * triangle_r / self.Rc) + 0.5
+        fc = fc_all * tf.cast(less_mask, dtype=tf.float32) #only keep less rc
+        zeros = tf.zeros([fc.shape[0], fc.shape[1]])
+        fc = tf.linalg.set_diag(fc, zeros) #make diags zero
+        Gij = tf.math.exp(-nu * (triangle_qqr2 - Rs) ** 2) * fc
+        Gi = tf.reduce_sum(Gij, 1)
+
+        return Gi
 
 
 class SumNRF(Layer):

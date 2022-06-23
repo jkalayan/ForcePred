@@ -267,6 +267,43 @@ class ScaleE2(Layer):
         return E3
 
 
+class GetEqm(Layer):
+    def __init__(self, atoms_flat, _NC2, **kwargs):
+        super(GetEqm, self).__init__()
+        self.atoms_flat = atoms_flat
+        self._NC2 = _NC2
+        self.au2kcalmola = 627.5095 * 0.529177
+
+    #def build(self, input_shape):
+        #self.kernal = self.add_weight('kernel')
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        n_atoms = input_shape[1]
+        #return (batch_size, n_atoms, n_atoms)
+        return (batch_size, 1)
+
+    def call(self, E_coords):
+        E_elec, coords = E_coords
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
+        #flatten diff2 so that _NC2 values are left
+        tri = tf.linalg.band_part(diff2, -1, 0) #lower
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        diff_flat = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        r = diff_flat**0.5
+        _NRF = ((self.atoms_flat * self.au2kcalmola) / (r ** 2))
+        E_nr = tf.reduce_sum(_NRF, 1, keepdims=True)
+        E_qm = E_elec + E_nr
+
+        return E_qm
+
+
+
 class ScaleFE(Layer):
     def __init__(self, _NC2, max_FE, **kwargs):
         super(ScaleFE, self).__init__()
@@ -508,10 +545,11 @@ class EijMatrix_test(Layer):
         E = E2/2
         #'''
 
-        '''
+        #''' 
+        #!!!!!!!!!!!!!!!!
         E_atoms = tf.reduce_sum(decompFE, 1) / 2
         E = tf.reduce_sum(E_atoms, 1, keepdims=True)
-        '''
+        #'''
 
         #E3 = ((E - self.prescale[2]) / 
                 #(self.prescale[3] - self.prescale[2]) * 
@@ -874,12 +912,12 @@ class Network(object):
                     'training set is {} points'.format(train))
             Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
                     split) #get train and test sets
-            #'''
+            '''
             print('!!!use regularly spaced training')
             molecule.train = np.arange(2, len(molecule.coords), split).tolist() 
             molecule.test = [x for x in range(0, len(molecule.coords)) 
                     if x not in molecule.train]
-            #'''
+            '''
 
             input_coords = molecule.coords#.reshape(-1,n_atoms*3)
             input_NRF = molecule.mat_NRF.reshape(-1,_NC2)
@@ -893,7 +931,8 @@ class Network(object):
                     (prescale1[3] - prescale1[2]) * 
                     (prescale1[1] - prescale1[0]) + prescale1[0])
             #output_atomFE = molecule.atomFE.reshape(-1,n_atoms) #per atom Es
-           # output_atomNRF = molecule.atomNRF.reshape(-1,n_atoms) #per atom NRFs
+            #output_atomNRF = molecule.atomNRF.reshape(-1,n_atoms) #per atom NRFs
+
 
             train_input_coords = np.take(input_coords, molecule.train, axis=0)
             test_input_coords = np.take(input_coords, molecule.test, axis=0)
@@ -1071,6 +1110,20 @@ class Network(object):
                     (prescale1[3] - prescale1[2]) * 
                     (prescale1[1] - prescale1[0]) + prescale1[0])
 
+            '''
+            print('!!!Added E_nr to E_elec to predict E_qm')
+            input_sumNRF = np.sum(input_NRF, axis=1).reshape(-1,1)
+            output_E_postscale = output_E_postscale + input_sumNRF
+            train_input_sumNRF = np.sum(train_input_NRF, axis=1).reshape(-1,1)
+            train_output_E_postscale = \
+                    train_output_E_postscale + train_input_sumNRF
+            test_input_sumNRF = np.sum(test_input_NRF, axis=1).reshape(-1,1)
+            test_output_E_postscale = \
+                    test_output_E_postscale + test_input_sumNRF
+            print(output_E_postscale[0], train_output_E_postscale[0], 
+                    test_output_E_postscale[0])
+            '''
+
             val_points = 50 #50
             print('val points: {}'.format(val_points))
             ###get validation from within training
@@ -1106,7 +1159,7 @@ class Network(object):
             #prescale1 = [-167315.01917961572, -167288.834575252, 
                     #-260.631337453833, 284.98286516421035]
 
-            prescael1 = [ -97086.67448670573, -97060.43620928681, 
+            prescale1 = [ -97086.67448670573, -97060.43620928681, 
                     -151.45141221653606, 162.38544000536768]
             #max_NRF1 = 12304.734510536122
             max_NRF1 = 9119.964965436488 #13010.961100355082 
@@ -1142,8 +1195,8 @@ class Network(object):
         max_depth = 1
         print('max_depth', max_depth)
         e_loss = [0, 0, 1, 1, 1, 1, 1, 1] #1
-        e2_loss = [_NC2, 0, 1, 1, 1, 1, 1, 1] #1
-        f_loss = [1, 0, 0, 0, 0, 0, 0, 0] #0
+        e2_loss = [1, 0, 1, 1, 1, 1, 1, 1] #1
+        f_loss = [0, 0, 0, 0, 0, 0, 0, 0] #0
         grad_loss = [1000, 0, 10, 1000, 1000, 1000, 1000, 1000] #1000
         q_loss = [0, 1, 10, 1, 1, 1, 1, 1] #_NC2 
         scaleq_loss = [_NC2, 1, 10, 1, 1, 1, 1, 1] #_NC2 
@@ -1200,9 +1253,9 @@ class Network(object):
                     #name='net_layer')(NRF_layer)
             #net_layer1 = Dense(units=500, activation='swish', 
                     #name='net_layer1')(NRF_layer)
-            net_layer2 = Dense(units=1000, activation='sigmoid', 
+            net_layer2 = Dense(units=1000, activation='sigmoid', #'swish', #
                     name='net_layer2')(NRF_layer)
-            net_layer3 = Dense(units=_NC2, activation='sigmoid', 
+            net_layer3 = Dense(units=_NC2, activation='sigmoid',#'linear', #
                     name='net_layer3')(net_layer2)
             scale_layer = ScaleFE(_NC2, max_FE, name='scale_layer')(
                     net_layer3)
@@ -1216,12 +1269,14 @@ class Network(object):
                     name='eij_layer')([coords_layer, scale_layer])
             scaleE_layer2 = ScaleE2(prescale, name='scaleE_layer2')(
                     eij_layer)
-
+            #e_qm_layer = GetEqm(atoms_flat, _NC2, name='e_qm_layer')(
+                    #[scaleE_layer2, coords_layer])
             eij_layer2 = EijMatrix_test2(n_atoms, _NC2, 
                     #name='eij_layer2')([coords_layer, net_layer3])
                     name='eij_layer2')([coords_layer, scale_layer])
             dE_dx = EnergyGradient(n_atoms, _NC2, 
                     name='dE_dx')([scaleE_layer2, coords_layer])
+                    #name='dE_dx')([e_qm_layer, coords_layer])
             qpairs = GetQ(n_atoms, _NC2, atoms_flat, name='qpairs')(
                     [coords_layer, dE_dx, eij_layer])
                     #dE_dx, sumNet_layer])
@@ -1291,6 +1346,7 @@ class Network(object):
                         #scale_atomEx, 
                         #sum_atomEx, 
                         scaleE_layer2,
+                        #e_qm_layer,
                         #net_layer2,
                         eij_layer, 
                         eij_layer2
@@ -1341,6 +1397,7 @@ class Network(object):
                             #'net_layer3': 'mse',
                             #'coords_layer': 'mse'
                             'scale_e2': 'mse',
+                            #'get_eqm': 'mse',
                             'get_q': 'mse',
                             },
                         loss_weights={
@@ -1348,6 +1405,7 @@ class Network(object):
                             'energy_gradient': grad_loss[l],
                             'eij_matrix_test': e_loss[l],
                             'scale_e2': e2_loss[l],
+                            #'get_eqm': e2_loss[l],
                             'eij_matrix_test2': f_loss[l],
                             #'scale_atom_e': q_loss[l],
                             'scale_fe': scaleq_loss[l],
@@ -1427,7 +1485,7 @@ class Network(object):
                                 val_output_E, 
                                 val_forces, 
                                 ]),
-                        epochs=1000000, 
+                        epochs=10,#00000, 
                         verbose=2,
                         #callbacks=[mc],
                         callbacks=[es,mc],
@@ -1531,6 +1589,7 @@ class Network(object):
         #load_weights = False
         if load_weights:
             model_file='best_model1'#'../model/best_ever_model_6'
+            #model_file='best_model'#'../model/best_ever_model_6'
             print('load_weights', load_weights, model_file)
             model.load_weights(model_file)
             #model.load_weights('best_model')

@@ -39,6 +39,7 @@ import tensorflow as tf
 #from itertools import islice
 
 import os
+import math
 #os.environ['OMP_NUM_THREADS'] = '8'
 
 # Get number of cores reserved by the batch system
@@ -65,19 +66,18 @@ def run_force_pred(input_files='input_files',
 
     if list_files:
         input_files = open(list_files).read().split()
-    OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
+    #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
     #OPTParser(input_files, molecule, opt=True) #read in FCEZ for opt
     #AMBERParser('molecules.prmtop', coord_files, force_files, molecule)
     #XYZParser(atom_file, coord_files, force_files, energy_files, molecule)
-    #NPParser(atom_file, coord_files, force_files, energy_files, molecule)
-    print(molecule)
+    NPParser(atom_file, coord_files, force_files, energy_files, molecule)
     #write pdb file for first frame
     Writer.write_pdb(molecule.coords[0], 'MOL', 1, molecule.atoms, 
             'molecule.pdb', 'w')
 
 
-
-    for Rs in range(5):
+    '''
+    for Rs in range(1):
         Converter.get_acsf(molecule, Rs)
 
         atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) for z, n in 
@@ -106,7 +106,10 @@ def run_force_pred(input_files='input_files',
                 ], 'acsf-{}'.format(Rs), 
                 header)
 
-    sys.exit()
+    print(np.min(molecule.mat_qqr2), np.max(molecule.mat_qqr2))
+    '''
+
+    #sys.exit()
 
     '''
     ##shorten num molecules here:
@@ -331,7 +334,7 @@ def run_force_pred(input_files='input_files',
             'training set is {} points'.format(train))
     Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
             split) #get train and test sets
-    #'''
+    '''
     print('!!!use regularly spaced training')
     molecule.train = np.arange(2, len(molecule.coords), split).tolist() 
             #includes the structure with highest force magnitude for malonaldehyde
@@ -339,7 +342,20 @@ def run_force_pred(input_files='input_files',
             if x not in molecule.train]
     print(len(molecule.train))
     print(len(molecule.test))
-    #'''
+    '''
+
+
+    '''
+    print('!!!Using electronic energies rather than QM: E_qm = E_elec + E_nr')
+    molecule.energies_orig = np.copy(molecule.energies)
+    Converter.get_all_NRFs(molecule)
+    sumNRFs = np.sum(molecule.mat_NRF, axis=1).reshape(-1,1)
+    molecule.energies_elec = molecule.energies_orig - sumNRFs
+    molecule.energies = np.copy(molecule.energies_elec)
+    print(molecule.energies_orig[0], sumNRFs[0], molecule.energies[0])
+    print(molecule.energies_orig.shape, sumNRFs.shape, molecule.energies.shape)
+    #sys.exit()
+    '''
 
     train_forces = np.take(molecule.forces, molecule.train, axis=0)
     train_energies = np.take(molecule.energies, molecule.train, axis=0)
@@ -464,7 +480,7 @@ def run_force_pred(input_files='input_files',
         #sys.exit()
 
     get_decompE = False
-    bias_type = '1/r' # 'NRF' #'qq/r2' # 
+    bias_type = '1/r' # 'NRF' # 'qq/r2' #
     print('\nenergy bias type: {}'.format(bias_type))
     if get_decompE:
         print('\nget mat_E')
@@ -805,13 +821,39 @@ def run_force_pred(input_files='input_files',
         diff_flat = tf.reshape(nonzero_values, 
                 shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
         r_flat = diff_flat**0.5
-
         au2kcalmola = 627.5095 * 0.529177
         au2kcalmola = tf.constant(au2kcalmola, dtype=tf.float32)
         _NRF = ((atoms_flat) / (r_flat ** 2))
+
+        '''
+        triangle_qqr2 = Triangle(_NRF)
+        triangle_r = Triangle(r_flat)
+        Rc = 5
+        nu = 4
+        Rs = 0
+        less_mask = tf.math.less_equal(triangle_r, Rc) #Bools inside
+        less_r = triangle_r * tf.cast(less_mask, dtype=tf.float32)
+        fc_all = 0.5 * tf.math.cos(math.pi * triangle_r / Rc) + 0.5
+        fc = fc_all * tf.cast(less_mask, dtype=tf.float32) #only keep less rc
+        zeros = tf.zeros([fc.shape[0], fc.shape[1]])
+        fc = tf.linalg.set_diag(fc, zeros) #make diags zero
+        Gij = tf.math.exp(-nu * (triangle_qqr2 - Rs) ** 2) * fc
+        Gij = tf.reduce_sum(Gij, 1)
+
+        #print('zeros', zeros.shape, sess.run(zeros))
+        print('Gij', sess.run(Gij))
+        print(molecule.acsf[0:3])
+        print('fc', sess.run(fc))
+        print('less_r', sess.run(less_r))
+        print('triangle_r', sess.run(triangle_r))
+        #sys.exit()
+        '''
+
+
         print('_NRF', _NRF.shape)
         print(sess.run(_NRF))
         print(molecule.mat_NRF[:3])
+
 
         #FOR ENERGY get energy 1/r_ij eij matrix
         recip_r = 1 / r_flat
@@ -996,7 +1038,7 @@ def run_force_pred(input_files='input_files',
         sys.stdout.flush()
         #sys.exit()
 
-    #molecule.mat_FE = molecule.mat_E
+    #molecule.mat_FE = molecule.mat_F
     #print('\n!!!!!!!!! *** using mat_E instead of mat_FE *** !!!!!!!!!!!')
     #sys.exit()
 

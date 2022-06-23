@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import matplotlib.colors as colors
+from scipy.interpolate import interp1d
 
 class Plotter(object):
     '''
@@ -198,6 +199,62 @@ class Plotter(object):
                 bbox_inches='tight',
                 )
         plt.close(plt.gcf())
+
+
+    def twinx_plot(x_list, y_list, label_list, color_list, 
+            xlabel, ylabel, ylabel2, size_list, plot_name):
+        '''Only for two differing scales'''
+        fig, ax = plt.subplots(figsize=(10, 10), 
+                edgecolor='k') #all in one plot
+
+        lines = []
+        lines2 = []
+        count = 0
+        for x, y, size, label, c in zip(x_list, y_list, size_list, 
+                label_list, color_list):
+            print('***', len(x), len(y))
+            if count%2 == 0:
+                line = ax.scatter(x, y, label=label, 
+                        s=size, facecolors=c, #'none', 
+                        edgecolors=c, #lw=2,
+                        )
+            if count%2 != 0:
+                if count == 1:
+                    ax2 = ax.twinx()
+                line = ax2.scatter(x, y, label=label, 
+                        s=size, facecolors=c, #'none', 
+                        edgecolors=c, #lw=2,
+                        )
+            lines.append(line)
+
+            xnew = np.linspace(x.min(), x.max(), 300)
+            f_smooth = interp1d(x, y, kind='cubic')
+            if count%2 == 0:
+                line2 = ax.plot(xnew, f_smooth(xnew), c=c, lw=3, label=label)
+            if count%2 != 0:
+                line2 = ax2.plot(xnew, f_smooth(xnew), c=c, lw=3, label=label)
+            lines2.append(line2)
+            count += 1
+
+        plt.grid(color='grey', linestyle='-', which='major', 
+                linewidth=2)
+        ax2.set_ylabel(ylabel2, fontsize=Plotter.axis_labels, 
+                weight='medium')
+
+
+        Plotter.format(ax, x, y, xlabel, ylabel)
+        #lgd = Plotter.get_legend(ax, lines, label_list)
+        lgd = ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
+                prop={'size': Plotter.tick_labels+4})
+        lgd.get_frame().set_alpha(0)
+        fig.savefig('%s' % (plot_name), 
+                #transparent=True,
+                #bbox_extra_artists=(lgd,),
+                bbox_inches='tight',
+                )
+        plt.close(plt.gcf())
+
+
 
     def xy_scatter(x_list, y_list, label_list, color_list, 
             xlabel, ylabel, size_list, plot_name):

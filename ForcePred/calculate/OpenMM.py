@@ -292,7 +292,7 @@ class OpenMM(object):
             simulation.context.setPositions(inpcrd.positions)
         #simulation.minimizeEnergy()
         #simulation.reporters.append(PDBReporter('openmm.pdb', 1))
-        simulation.reporters.append(StateDataReporter('openmm.csv', 1,
+        simulation.reporters.append(StateDataReporter('openmm.csv', 4,
                 #1000, #
                 step=True, potentialEnergy=True, kineticEnergy=True, 
                 temperature=True))

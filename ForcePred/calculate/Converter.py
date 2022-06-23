@@ -736,10 +736,10 @@ class Converter(object):
                     Rc = 5
                     nu = 4
                     if r < Rc:
-                        fc = 0.5 * np.cos(np.pi * qqr2 / Rc) + 0.5
+                        fc = 0.5 * np.cos(np.pi * r / Rc) + 0.5
                     if r > Rc:
                         fc = 0
-                    Gij = np.exp(-nu * (r - Rs) ** 2) * Rc
+                    Gij = np.exp(-nu * (qqr2 - Rs) ** 2) * fc
                     molecule.acsf[s,i] += Gij
                     molecule.acsf[s,j] += Gij
                     molecule.mat_eij_FE[s,n_atoms*3,_N] = qqr2
