@@ -73,9 +73,16 @@ class CoordsToNRF_test(Layer):
         nonzero_values = tf.gather_nd(tri, nonzero_indices)
         diff_flat = tf.reshape(nonzero_values, 
                 shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
-        r = diff_flat**0.5
-        _NRF = (((self.atoms_flat * self.au2kcalmola) / (r ** 2)) / 
+        r = diff_flat ** 0.5
+
+        rc = 4
+        recip_r2 = 1 / r ** 2
+        recip_r2 = tf.where(tf.math.less(recip_r2, 1 / rc ** 2), 
+                tf.zeros_like(recip_r2), recip_r2) 
+
+        _NRF = (((self.atoms_flat * self.au2kcalmola) * recip_r2) / 
                 self.max_NRF) #scaled
+
         return _NRF
 
 
@@ -513,10 +520,8 @@ class EijMatrix_test(Layer):
         #coords = coords_decompFE[:,:,:3]
         #decompFE = coords_decompFE[:,:,3:]
         coords, decompFE_flat = coords_decompFE
-        decompFE = Triangle(self.n_atoms)(decompFE_flat)
 
 
-        #'''
         a = tf.expand_dims(coords, 2)
         b = tf.expand_dims(coords, 1)
         diff = a - b
@@ -530,26 +535,79 @@ class EijMatrix_test(Layer):
         r_flat = diff_flat**0.5
 
 
+
+
+
         #_NRF = ((self.atoms_flat * self.au2kcalmola) / (r_flat ** 2))
-        _NRF = ((self.atoms_flat) / (r_flat ** 2))
+        #_NRF = ((self.atoms_flat) / (r_flat ** 2))
 
         #get energy 1/r_ij eij matrix
+        ##model2
+        '''
+        decompFE = Triangle(self.n_atoms)(decompFE_flat)
         recip_r_flat = 1 / r_flat
+        norm_recip_r = tf.reduce_sum(recip_r_flat ** 2, axis=1, 
+                keepdims=True) ** 0.5
+        norm_recip_r_flat = recip_r_flat / norm_recip_r
         #ones = tf.ones_like(recip_r_flat)
-        Q3 = Triangle(self.n_atoms)(recip_r_flat)
+        Q3 = Triangle(self.n_atoms)(norm_recip_r_flat)
         #Q3 = Triangle(self.n_atoms)(_NRF)
         #Q3 = Triangle(self.n_atoms)(ones) #!!!!!
         eij_E = tf.expand_dims(Q3, 3)
         #dot product of 
         E2 = tf.einsum('bijk, bij -> bk', eij_E, decompFE)
         E = E2/2
+        '''
+
+
+        ##adding 1 extra col
+        #'''
+        ones = tf.ones_like(r_flat)
+        ones = tf.reshape(ones[:,0], shape=(-1, 1))
+        r_flat_test = tf.concat([r_flat, ones], 1) 
+        recip_r_flat = 1 / r_flat_test
+
+        #set rs greater than rc to zero
+        rc = 4
+        recip_r_flat = tf.where(tf.math.less(recip_r_flat, 1/rc), 
+                tf.zeros_like(recip_r_flat), recip_r_flat) 
+
+        norm_recip_r = tf.reduce_sum(recip_r_flat ** 2, axis=1, 
+                keepdims=True) ** 0.5
+        norm_recip_r_flat = recip_r_flat / norm_recip_r
+
+
+        E = tf.einsum('bi, ib -> b', norm_recip_r_flat, 
+                tf.transpose(decompFE_flat))
+        E = tf.reshape(E, shape=(tf.shape(tri)[0], 1)) #need to define shape
         #'''
 
-        #''' 
+
+
+        '''
+        recip_r_flat = r_flat
+        ##!!!!!!!! model15
+        ones = tf.ones_like(recip_r_flat)
+        ones = tf.reshape(ones[:,0], shape=(-1, 1))
+        r_flat_test = tf.concat([r_flat, ones], 1) 
+        ##!!!!!!!! model16
+        r_tri = Triangle(self.n_atoms)(r_flat)
+        sumrs = (1 / tf.reduce_sum(r_tri, 1)) / self.n_atoms #recip
+        r_flat_test = tf.concat([r_flat, sumrs], 1) 
+        #E_test = tf.linalg.matmul(r_flat_test, tf.transpose(decompFE_flat))
+        #E = tf.linalg.diag_part(E_test) #only choose diags
+        E = tf.einsum('bi, ib -> b', r_flat_test, tf.transpose(decompFE_flat))
+        E = tf.reshape(E, shape=(tf.shape(tri)[0], 1)) #need to define shape
+        '''
+
+        #for sumq model2
+        '''  
         #!!!!!!!!!!!!!!!!
-        E_atoms = tf.reduce_sum(decompFE, 1) / 2
-        E = tf.reduce_sum(E_atoms, 1, keepdims=True)
-        #'''
+        #decompFE = Triangle(self.n_atoms)(decompFE_flat)
+        #E_atoms = tf.reduce_sum(decompFE, 1) / 2
+        #E = tf.reduce_sum(E_atoms, 1, keepdims=True)
+        E = tf.reduce_sum(decompFE_flat, 1, keepdims=True)
+        '''
 
         #E3 = ((E - self.prescale[2]) / 
                 #(self.prescale[3] - self.prescale[2]) * 
@@ -874,6 +932,8 @@ class Network(object):
 
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms*(n_atoms-1)/2)
+        extra_cols = 1 #0 #n_atoms ## !!!!!!!!
+        print('!!!!! extra_cols:', extra_cols)
         atoms = np.array([float(i) for i in molecule.atoms], dtype='float32')
         atoms_ = tf.convert_to_tensor(atoms, dtype=tf.float32)
         #multiply each z with each other to get a sq matrix
@@ -887,7 +947,7 @@ class Network(object):
                 atoms_flat.append(ij)
         atoms_flat = tf.convert_to_tensor(atoms_flat, dtype=tf.float32) #_NC2
 
-        training_model = False
+        training_model = True
         if training_model:
             #for training a model
             get_data = True
@@ -907,11 +967,15 @@ class Network(object):
         #get_data = True
         if get_data:
             split = 100 #500 #200 #2
+
+            '''
             train = round(len(molecule.coords) / split, 3)
             print('\nget train and test sets, '\
                     'training set is {} points'.format(train))
             Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
                     split) #get train and test sets
+            '''
+
             '''
             print('!!!use regularly spaced training')
             molecule.train = np.arange(2, len(molecule.coords), split).tolist() 
@@ -919,10 +983,13 @@ class Network(object):
                     if x not in molecule.train]
             '''
 
+            print('N train {}\nN test {}'.format(
+                    len(molecule.train), len(molecule.test)))
+
             input_coords = molecule.coords#.reshape(-1,n_atoms*3)
             input_NRF = molecule.mat_NRF.reshape(-1,_NC2)
             #input_eij = molecule.mat_eij
-            output_matFE = molecule.mat_FE.reshape(-1,_NC2)
+            output_matFE = molecule.mat_FE.reshape(-1,_NC2+extra_cols)
             output_FE = np.concatenate((molecule.forces.reshape(-1,n_atoms*3), 
                     molecule.energies.reshape(-1,1)), axis=1)
             output_F = molecule.forces.reshape(-1,n_atoms,3)
@@ -944,6 +1011,7 @@ class Network(object):
             train_output_FE = np.take(output_FE, molecule.train, axis=0)
             train_output_E = np.take(output_E, molecule.train, axis=0)
             test_output_E = np.take(output_E, molecule.test, axis=0)
+            test_output_F = np.take(output_F, molecule.test, axis=0)
             #train_output_atomFE = np.take(output_atomFE, molecule.train, axis=0)
             #test_output_atomFE = np.take(output_atomFE, molecule.test, axis=0)
             #train_output_atomNRF = np.take(output_atomNRF, molecule.train, axis=0)
@@ -957,8 +1025,8 @@ class Network(object):
             max_sumNRF1 = np.max(np.abs(np.sum(train_input_NRF, axis=1)))
             max_E1 = np.max(np.abs(train_output_E))
             max_FE1 = np.max(np.abs(train_output_matFE))
-            print('***!!!OVERRIDING MAX_FE1 WITH FE NOT MATFE!!!!')
-            max_FE1 = np.max(np.abs(train_output_FE))
+            #print('***!!!OVERRIDING MAX_FE1 WITH FE NOT MATFE needed for model 2!!!!')
+            #max_FE1 = np.max(np.abs(train_output_FE))
             #max_atomFE1 = np.max(np.abs(train_output_atomFE))
             #max_atomNRF1 = np.max(np.abs(train_output_atomNRF))
             train_output_matFE_scaled = train_output_matFE / (2 * max_FE1) + 0.5
@@ -1124,7 +1192,7 @@ class Network(object):
                     test_output_E_postscale[0])
             '''
 
-            val_points = 50 #50
+            val_points = 50
             print('val points: {}'.format(val_points))
             ###get validation from within training
             train2, val = Molecule.make_train_test(train_output_E.flatten(), 
@@ -1177,7 +1245,7 @@ class Network(object):
 
         file_name='best_model'
         monitor_loss='loss'
-        set_patience=5000
+        set_patience=1000
         print('monitor_loss:', monitor_loss)
         print('set_patience', set_patience)
         mc = ModelCheckpoint(file_name, monitor=monitor_loss, mode='min', 
@@ -1198,8 +1266,8 @@ class Network(object):
         e2_loss = [1, 0, 1, 1, 1, 1, 1, 1] #1
         f_loss = [0, 0, 0, 0, 0, 0, 0, 0] #0
         grad_loss = [1000, 0, 10, 1000, 1000, 1000, 1000, 1000] #1000
-        q_loss = [0, 1, 10, 1, 1, 1, 1, 1] #_NC2 
-        scaleq_loss = [_NC2, 1, 10, 1, 1, 1, 1, 1] #_NC2 
+        q_loss = [0, n_atoms, 1, 10, 1, 1, 1, 1, 1] #_NC2 
+        scaleq_loss = [1, 1, 10, 1, 1, 1, 1, 1] #_NC2, this one is used!
         best_error_all = 1e20
         best_iteration = 0
         best_model = None
@@ -1207,8 +1275,8 @@ class Network(object):
             print('l', l)
             l2 = str(l)
             print('E loss weight: {} \nrecompF loss weight: {} '\
-                    '\ndE_dx loss weight: {} \nq loss weight: {} '\
-                    '\nscaleq loss weight: {} \nE2 loss weight: {}'.format(
+                    '\n* dE_dx loss weight: {} \nq loss weight: {} '\
+                    '\n* scaleq loss weight: {} \n* E2 loss weight: {}'.format(
                     e_loss[l], f_loss[l], grad_loss[l], q_loss[l], 
                     scaleq_loss[l], e2_loss[l]))
             #if l > 0:
@@ -1255,10 +1323,15 @@ class Network(object):
                     #name='net_layer1')(NRF_layer)
             net_layer2 = Dense(units=1000, activation='sigmoid', #'swish', #
                     name='net_layer2')(NRF_layer)
-            net_layer3 = Dense(units=_NC2, activation='sigmoid',#'linear', #
+
+            #'''
+            net_layer3 = Dense(
+                    units=_NC2+extra_cols, 
+                    activation='sigmoid',#'linear', #
                     name='net_layer3')(net_layer2)
-            scale_layer = ScaleFE(_NC2, max_FE, name='scale_layer')(
-                    net_layer3)
+            scale_layer = ScaleFE(
+                    _NC2+extra_cols, 
+                    max_FE, name='scale_layer')(net_layer3)
             #E_layer = Dense(units=1, activation='sigmoid', 
                     #name='E_layer')(net_layer3)
             #sumNet_layer = SumNet(max_FE, name='sumNet_layer')(net_layer3)
@@ -1269,17 +1342,34 @@ class Network(object):
                     name='eij_layer')([coords_layer, scale_layer])
             scaleE_layer2 = ScaleE2(prescale, name='scaleE_layer2')(
                     eij_layer)
+            #'''
+
+
+            '''
+            ### FOR ONE Q == E
+            net_layer3 = Dense(units=1, 
+                    activation='sigmoid',#'linear', #
+                    name='net_layer3')(net_layer2)
+            net_layer4 = Dense(units=1, 
+                    activation='linear', #'sigmoid',#
+                    name='net_layer4')(net_layer3)
+            scaleE_layer2 = ScaleE2(prescale, name='scaleE_layer2')(
+                    net_layer4)
+            '''
+
+
+            
             #e_qm_layer = GetEqm(atoms_flat, _NC2, name='e_qm_layer')(
                     #[scaleE_layer2, coords_layer])
-            eij_layer2 = EijMatrix_test2(n_atoms, _NC2, 
-                    #name='eij_layer2')([coords_layer, net_layer3])
-                    name='eij_layer2')([coords_layer, scale_layer])
+            #eij_layer2 = EijMatrix_test2(n_atoms, _NC2, 
+                    ##name='eij_layer2')([coords_layer, net_layer3])
+                    #name='eij_layer2')([coords_layer, scale_layer])
             dE_dx = EnergyGradient(n_atoms, _NC2, 
                     name='dE_dx')([scaleE_layer2, coords_layer])
                     #name='dE_dx')([e_qm_layer, coords_layer])
-            qpairs = GetQ(n_atoms, _NC2, atoms_flat, name='qpairs')(
-                    [coords_layer, dE_dx, eij_layer])
-                    #dE_dx, sumNet_layer])
+            #qpairs = GetQ(n_atoms, _NC2, atoms_flat, name='qpairs')(
+                    #[coords_layer, dE_dx, eij_layer])
+                    ##dE_dx, sumNet_layer])
 
 
 
@@ -1334,22 +1424,21 @@ class Network(object):
 
             model = Model(
                     inputs=[coords_layer], 
-                    #inputs=[NRF_layer], 
+                    ##inputs=[NRF_layer], 
                     outputs=[
-                        #coords_layer,
-                        #forces_layer, 
-                        #eij_layer2, 
+                        ##coords_layer,
+                        ##forces_layer, 
                         dE_dx, 
                         scale_layer,
-                        #net_layer3,
-                        qpairs,
-                        #scale_atomEx, 
-                        #sum_atomEx, 
+                        ##net_layer3,
+                        ##qpairs,
+                        ##scale_atomEx, 
+                        ##sum_atomEx, 
                         scaleE_layer2,
-                        #e_qm_layer,
-                        #net_layer2,
-                        eij_layer, 
-                        eij_layer2
+                        ##e_qm_layer,
+                        ##net_layer2,
+                        #eij_layer, 
+                        ##eij_layer2
                         ], 
                     )
 
@@ -1389,28 +1478,28 @@ class Network(object):
                             #tf.constant(train2_forces, dtype=tf.float32),
                             #),
                             'energy_gradient': 'mse',
-                            'eij_matrix_test2': 'mse',
+                            #'eij_matrix_test2': 'mse',
                             #'scale_atom_e': 'mse',
                             #'sum_atom_e': 'mse',
-                            'eij_matrix_test': 'mse',
-                            'scale_fe': 'mse',
+                            #'eij_matrix_test': 'mse', #*
+                            'scale_fe': 'mse', #*
                             #'net_layer3': 'mse',
                             #'coords_layer': 'mse'
                             'scale_e2': 'mse',
                             #'get_eqm': 'mse',
-                            'get_q': 'mse',
+                            #'get_q': 'mse',
                             },
                         loss_weights={
                             #'for_forces': 0, #grad_loss - q_loss[l],
                             'energy_gradient': grad_loss[l],
-                            'eij_matrix_test': e_loss[l],
+                            #'eij_matrix_test': e_loss[l], #*
                             'scale_e2': e2_loss[l],
                             #'get_eqm': e2_loss[l],
-                            'eij_matrix_test2': f_loss[l],
+                            #'eij_matrix_test2': f_loss[l],
                             #'scale_atom_e': q_loss[l],
-                            'scale_fe': scaleq_loss[l],
+                            'scale_fe': scaleq_loss[l], #*
                             #'net_layer3': scaleq_loss[l],
-                            'get_q': q_loss[l],
+                            #'get_q': q_loss[l],
                             #'sum_atom_e': e_loss[l],
                             #'coords_layer': 0
                             },
@@ -1470,22 +1559,22 @@ class Network(object):
                 model.fit(train2_input_coords, 
                         [
                             train2_forces, 
-                            train2_output_matFE, 
+                            #train2_output_matFE, 
                             train2_output_matFE, 
                             train2_output_E_postscale, 
-                            train2_output_E, 
-                            train2_forces, 
+                            #train2_output_E, 
+                            #train2_forces, 
                             ],
                         validation_data=(val_input_coords, 
                             [
                                 val_forces, 
-                                val_output_matFE, 
+                                #val_output_matFE, 
                                 val_output_matFE, 
                                 val_output_E_postscale, 
-                                val_output_E, 
-                                val_forces, 
+                                #val_output_E, 
+                                #val_forces, 
                                 ]),
-                        epochs=10,#00000, 
+                        epochs=1000000, 
                         verbose=2,
                         #callbacks=[mc],
                         callbacks=[es,mc],
@@ -1495,11 +1584,11 @@ class Network(object):
                 best_error = model.evaluate(train2_input_coords, 
                         [
                             train2_forces, 
-                            train2_output_matFE, 
+                            #train2_output_matFE, 
                             train2_output_matFE, 
                             train2_output_E_postscale, 
-                            train2_output_E, 
-                            train2_forces, 
+                            #train2_output_E, 
+                            #train2_forces, 
                             ],
                         verbose=0)
                 print(l, 'model error train2: ', best_error)
@@ -1507,11 +1596,11 @@ class Network(object):
                 best_error2 = model.evaluate(val_input_coords, 
                         [
                             val_forces, 
-                            val_output_matFE, 
+                            #val_output_matFE, 
                             val_output_matFE, 
                             val_output_E_postscale, 
-                            val_output_E, 
-                            val_forces, 
+                            #val_output_E, 
+                            #val_forces, 
                             ],
                         verbose=0)
                 print(l, 'model error val: ', best_error2)
@@ -1519,11 +1608,11 @@ class Network(object):
                 best_error3 = model.evaluate(train_input_coords, 
                         [
                             train_forces, 
-                            train_output_matFE, 
+                            #train_output_matFE, 
                             train_output_matFE, 
                             train_output_E_postscale, 
-                            train_output_E, 
-                            train_forces, 
+                            #train_output_E, 
+                            #train_forces, 
                             ],
                         verbose=0)
                 print(l, 'model error train: ', best_error3)
@@ -1531,11 +1620,11 @@ class Network(object):
                 best_error4 = model.evaluate(test_input_coords, 
                         [
                             test_forces, 
-                            test_output_matFE, 
+                            #test_output_matFE, 
                             test_output_matFE, 
                             test_output_E_postscale, 
-                            test_output_E, 
-                            test_forces, 
+                            #test_output_E, 
+                            #test_forces, 
                             ],
                         verbose=0)
                 print(l, 'model error test: ', best_error4)
@@ -1543,11 +1632,11 @@ class Network(object):
                 best_error5 = model.evaluate(input_coords, 
                         [
                             output_F, 
-                            output_matFE, 
+                            #output_matFE, 
                             output_matFE, 
                             output_E_postscale, 
-                            output_E, 
-                            output_F, 
+                            #output_E, 
+                            #output_F, 
                             ],
                         verbose=0)
                 print(l, 'model error all: ', best_error5)
@@ -1598,11 +1687,11 @@ class Network(object):
             best_error = model.evaluate(train_input_coords, 
                     [
                         train_forces, 
-                        train_output_matFE,
+                        #train_output_matFE,
                         train_output_matFE,
                         train_output_E_postscale,
-                        train_output_E,
-                        train_forces, 
+                        #train_output_E,
+                        #train_forces, 
                         ], verbose=0)
             print(l, len(train_input_coords), 'train model error: ', 
                     best_error)
@@ -1630,11 +1719,12 @@ class Network(object):
                 for count, p in enumerate(prediction):
                     print(count, p)
 
-                au2kcalmola = 627.5095 * 0.529177
-                print('mat_FE * NRF')
-                _E = np.sum(train2_input_NRF[i] / au2kcalmola * prediction[1])
-                print(_E)
-                print(np.sum(train2_input_NRF[i] / au2kcalmola * train2_output_matFE[i]))
+                #au2kcalmola = 627.5095 * 0.529177
+                #print('mat_FE * NRF')
+                #_E = np.sum(train2_input_NRF[i] / au2kcalmola * prediction[1])
+                #print(_E)
+                #print(np.sum(train2_input_NRF[i] / au2kcalmola * 
+                        #train2_output_matFE[i]))
 
                 '''
                 E = layer_output.predict(
@@ -1752,7 +1842,8 @@ class Network(object):
 
             print('Predict all data')
             prediction = model.predict(input_coords)
-            prediction_E = prediction[3].flatten()
+            #prediction_E = prediction[1].flatten()
+            prediction_E = prediction[2].flatten()
             #prediction_F = prediction[1].flatten()
             prediction_matFE = prediction[1]
             #prediction_atomFE = prediction[1]
@@ -1807,6 +1898,27 @@ class Network(object):
             sys.stdout.flush()
             '''
 
+
+
+            print('Predict test data')
+            test_prediction = model.predict(test_input_coords)
+            test_prediction_E = test_prediction[2].flatten()
+            #test_prediction_E = test_prediction[1].flatten()
+            test_prediction_F = test_prediction[0]
+
+            mae, rms, msd = Binner.get_error(test_output_E_postscale.flatten(), 
+                    test_prediction_E.flatten())
+            print('\n{} E Test MAE: {} \nTest RMS: {} '\
+                    '\nTest MSD: {}'.format(len(test_output_E_postscale), 
+                    mae, rms, msd))
+
+            mae, rms, msd = Binner.get_error(test_output_F.flatten(), 
+                    test_prediction_F.flatten())
+            print('\n{} grad F Test MAE: {} \nTest RMS: {} '\
+                    '\nTest MSD: {}'.format(len(test_output_F), mae, rms, msd))
+
+
+
             mae, rms, msd = Binner.get_error(output_E_postscale.flatten(), 
                     prediction_E.flatten())
             print('\n{} E All MAE: {} \nAll RMS: {} '\
@@ -1818,9 +1930,9 @@ class Network(object):
             print('check rms:', check_rms, len(prediction_E.flatten()))
             bin_edges, hist = Binner.get_scurve(output_E_postscale.flatten(), 
                     prediction_E.flatten(), 'all-hist1.txt')
-            Plotter.plot_2d([bin_edges], [hist], ['all'], 
+            Plotter.plot_2d([bin_edges], [hist], [''], 
                     'Error', '% of points below error', 
-                    'all-s-curves-E.png')
+                    'all-s-curves-E.pdf')
 
             mae, rms, msd = Binner.get_error(output_F.flatten(), 
                     prediction_F.flatten())
@@ -1832,9 +1944,9 @@ class Network(object):
             print('check rms:', check_rms, len(prediction_F.flatten()))
             bin_edges, hist = Binner.get_scurve(output_F.flatten(), 
                     prediction_F.flatten(), 'all-hist3.txt')
-            Plotter.plot_2d([bin_edges], [hist], ['all'], 
+            Plotter.plot_2d([bin_edges], [hist], [''], 
                     'Error', '% of points below error', 
-                    'all-s-curves-F.png')
+                    'all-s-curves-F.pdf')
 
             #'''
             mae, rms, msd = Binner.get_error(output_matFE.flatten(), 
@@ -1847,9 +1959,9 @@ class Network(object):
             print('check rms:', check_rms, len(prediction_matFE.flatten()))
             bin_edges, hist = Binner.get_scurve(output_matFE.flatten(), 
                     prediction_matFE.flatten(), 'all-hist2.txt')
-            Plotter.plot_2d([bin_edges], [hist], ['all'], 
+            Plotter.plot_2d([bin_edges], [hist], [''], 
                     'Error', '% of points below error', 
-                    'all-s-curves-matFE.png')
+                    'all-s-curves-matFE.pdf')
             #'''
 
             '''
@@ -1859,9 +1971,9 @@ class Network(object):
                     '\nAll MSD: {}'.format(len(output_atomFE), mae, rms, msd))
             bin_edges, hist = Binner.get_scurve(output_atomFE.flatten(), 
                     prediction_atomFE.flatten(), 'all-hist4.txt')
-            Plotter.plot_2d([bin_edges], [hist], ['all'], 
+            Plotter.plot_2d([bin_edges], [hist], [''], 
                     'Error', '% of points below error', 
-                    'all-s-curves-atomFE.png')
+                    'all-s-curves-atomFE.pdf')
             '''
 
             sys.stdout.flush()

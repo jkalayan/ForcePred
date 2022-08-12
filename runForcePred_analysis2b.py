@@ -34,6 +34,12 @@ import sys
 #import os
 #os.environ['OMP_NUM_THREADS'] = '8'
 
+import os
+# Get number of cores reserved by the batch system
+# ($NSLOTS is set by the batch system, or use 1 otherwise)
+NUMCORES=int(os.getenv('NSLOTS', 1))
+print('Using', NUMCORES, 'core(s)' )
+
 
 def run_force_pred(input_files='input_files', 
         atom_file='atom_file', coord_files='coord_files',
@@ -50,6 +56,35 @@ def run_force_pred(input_files='input_files',
     if list_files:
         input_files = open(list_files).read().split()
 
+
+    ###for s-curves
+    x_y = np.loadtxt('../all-hist1.txt').T
+    bin_edges1, hist1 = x_y[0], x_y[1]
+    Plotter.plot_2d([bin_edges1], [hist1], [''], 
+            '$E$ MAE', '% of points below error', 
+            'all-s-curves-E.pdf')
+
+    x_y = np.loadtxt('../all-hist3.txt').T
+    bin_edges3, hist3 = x_y[0], x_y[1]
+    Plotter.plot_2d([bin_edges3], [hist3], [''], 
+            '$\mathbf{F}$ MAE', '% of points below error', 
+            'all-s-curves-F.pdf')
+
+    Plotter.plot_2d([bin_edges1, bin_edges3], [hist1, hist3], 
+            ['$E$', '$\mathbf{F}$'], 
+            'MAE', '% of points below error', 
+            'all-s-curves-F-E.pdf')
+
+    x_y = np.loadtxt('../all-hist2.txt').T
+    bin_edges, hist = x_y[0], x_y[1]
+    Plotter.plot_2d([bin_edges], [hist], [''], 
+            '$q_{ij}$ MAE', '% of points below error', 
+            'all-s-curves-matFE.pdf')
+
+
+
+
+
     print('Load data')
     dataset_molecule = Molecule()
     NPParser(atom_file, [coord_files[0]], [force_files[0]], [energy_files[0]], 
@@ -63,6 +98,7 @@ def run_force_pred(input_files='input_files',
             dataset_molecule.energies.flatten(), split) 
             #get train and test sets
 
+    #'''
     #get trained data only
     dataset_molecule.coords = np.take(dataset_molecule.coords, 
             dataset_molecule.train, axis=0)
@@ -70,6 +106,7 @@ def run_force_pred(input_files='input_files',
             dataset_molecule.train, axis=0)
     dataset_molecule.energies = np.take(dataset_molecule.energies, 
             dataset_molecule.train, axis=0)
+    #'''
 
     #truncate dataset
     #dataset_molecule.coords = dataset_molecule.coords[::10]#[:20000:4]#[::20]
@@ -92,7 +129,7 @@ def run_force_pred(input_files='input_files',
             mlmm_molecule.energies.shape)
 
     '''
-    trucate_model = 1576 # 7 1644 #5 2667 #3 2757 #2 3138 #4 
+    trucate_model = 3700 # 7 1644 #5 2667 #3 2757 #2 3138 #4 
     model_molecule.coords = model_molecule.coords[:trucate_model]
     model_molecule.forces = model_molecule.forces[:trucate_model]
     model_molecule.energies = model_molecule.energies[:trucate_model]
@@ -173,33 +210,35 @@ def run_force_pred(input_files='input_files',
             [model_measures.phis.T[1], mlmm_measures.phis.T[1], 
             dataset_measures.phis.T[1]], 
             ['ML', 'ML/MM', 'DFT'], ['r', 'dodgerblue', 'k'], 
-            '$\\tau_1$ (deg)', 
-            '$\\tau_2$ (deg)', [5, 5, 10],
+            '$\\tau_1$ (degrees)', 
+            '$\\tau_2$ (degrees)', 
+            #[5, 5, 10],
+            [5, 5, 10],
             'dihs-dataset-model.pdf')
 
     Plotter.xy_scatter([dataset_measures.phis.T[0]], 
             [dataset_measures.phis.T[1]], 
-            ['DFT'], ['k'], '$\\tau_1$ (deg)', '$\\tau_2$ (deg)', [1], 
+            ['DFT'], ['k'], '$\\tau_1$ (degrees)', '$\\tau_2$ (degrees)', [1], 
             'dihs-dataset.pdf')
 
     Plotter.xy_scatter([model_measures.phis.T[0]], 
             [model_measures.phis.T[1]], 
-            ['ML'], ['r'], '$\\tau_1$ (deg)', '$\\tau_2$ (deg)', [5], 
+            ['ML'], ['r'], '$\\tau_1$ (degrees)', '$\\tau_2$ (degrees)', [5], 
             'dihs-model.pdf')
 
     Plotter.hist_2d([dataset_measures.phis.T[0], model_measures.phis.T[0]], 
             [dataset_measures.phis.T[1], model_measures.phis.T[1]], 
-            ['Greys', 'Reds'], '$\\tau_1$ (deg)', '$\\tau_2$ (deg)', 
+            ['Greys', 'Reds'], '$\\tau_1$ (degrees)', '$\\tau_2$ (degrees)', 
             'hist2d-dihs-dataset-model.pdf')
 
     Plotter.hist_2d([dataset_measures.phis.T[0]], 
             [dataset_measures.phis.T[1]], 
-            ['Greys'], '$\\tau_1$ (deg)', '$\\tau_2$ (deg)', 
+            ['Greys'], '$\\tau_1$ (degrees)', '$\\tau_2$ (degrees)', 
             'hist2d-dihs-dataset.pdf')
 
     Plotter.hist_2d([model_measures.phis.T[0]], 
             [model_measures.phis.T[1]], 
-            ['Reds'], '$\\tau_1$ (deg)', '$\\tau_2$ (deg)', 
+            ['Reds'], '$\\tau_1$ (degrees)', '$\\tau_2$ (degrees)', 
             'hist2d-dihs-model.pdf')
     #'''
 
@@ -258,6 +297,7 @@ def run_force_pred(input_files='input_files',
         for j in range(i):
             print(_N, i, j)
             pairs.append([i, j])
+            _N += 1
 
     model_interatomic_measures = Binner()
     model_interatomic_measures.get_bond_pop(model_molecule.coords, pairs)
@@ -277,7 +317,7 @@ def run_force_pred(input_files='input_files',
                 model_interatomic_measures.rs.T.flatten(), 
                 dataset_interatomic_measures.rs.T.flatten(), 
                 1000, 
-                '$r_{ij}/ \AA$', ''
+                '$|| \\vec{r}_{ij}$ || / $\mathrm{\AA}$', ''
                 ],
             #[model_interatomic_measures.rs.T[9].flatten(), 
                 #dataset_interatomic_measures.rs.T[9].flatten(), 200, 
@@ -291,7 +331,7 @@ def run_force_pred(input_files='input_files',
                 [bin_edges2, bin_edges], 
                 [hist2, hist], 
                 ['DFT', 'ML'], ['k', 'r'], 
-                i[3], 'P($r_{ij}$)', [10, 10],
+                i[3], 'P($|| \\vec{r}_{ij} ||$)', [10, 10],
                 'hist-model-dataset-r-{}.pdf'.format(i[4]))
 
 
@@ -301,14 +341,17 @@ def run_force_pred(input_files='input_files',
                 mlmm_interatomic_measures.rs.T.flatten(), 
                 dataset_interatomic_measures.rs.T.flatten(), 
                 1000, 
-                '$r_{ij}/ \AA$', 'all'
+                '$|| \\vec{r}_{ij} ||$ / $\mathrm{\AA}$', 'all'
                 ],
+
+                ''' #hard-coded for malonaldehyde OO interaction
                 [
                 model_interatomic_measures.rs.T[9].flatten(), 
                 mlmm_interatomic_measures.rs.T[9].flatten(), 
                 dataset_interatomic_measures.rs.T[9].flatten(), 
                 100, 
-                '$r_{ij}/ \AA$', '4-3']
+                '$|| \\vec{r}_{ij} ||$ / $\mathrm{\AA}$', '4-3']
+                '''
             ]
 
     for i in info:
@@ -319,7 +362,9 @@ def run_force_pred(input_files='input_files',
                 [bin_edges3, bin_edges, bin_edges2], 
                 [hist3, hist, hist2], 
                 ['DFT', 'ML', 'ML/MM'], ['k', 'r', 'dodgerblue'], 
-                i[4], 'P($r_{ij}$)', [10, 10, 10],
+                i[4], 'P($|| \\vec{r}_{ij} ||$)', 
+                [10]*3,
+                #[50]*3,
                 'hist-model-dataset-r-{}.pdf'.format(i[5]))
 
 

@@ -71,10 +71,64 @@ def run_force_pred(input_files='input_files',
     #AMBERParser('molecules.prmtop', coord_files, force_files, molecule)
     #XYZParser(atom_file, coord_files, force_files, energy_files, molecule)
     NPParser(atom_file, coord_files, force_files, energy_files, molecule)
+
+    '''
+    ##glycol NMA around stationary points
+    molecule_train = Molecule() #initiate molecule class
+    molecule_test = Molecule() #initiate molecule class
+    NPParser(atom_file, [coord_files[0]], [force_files[0]], [energy_files[0]], 
+            molecule_train)
+    NPParser(atom_file, [coord_files[1]], [force_files[1]], [energy_files[1]], 
+            molecule_test)
+    print(molecule_train)
+    print(molecule_test)
+    molecule.filenames = np.append(molecule_train.filenames, 
+            molecule_test.filenames, axis=0)
+    molecule.atoms = np.copy(molecule_train.atoms)
+    molecule.coords = np.append(molecule_train.coords, molecule_test.coords, 
+            axis=0)
+    molecule.forces = np.append(molecule_train.forces, molecule_test.forces,
+            axis=0) * Converter.Eh2kcalmol / Converter.au2Ang
+    molecule.energies = np.append(molecule_train.energies, 
+            molecule_test.energies, axis=0) * Converter.Eh2kcalmol
+    print(molecule.coords.shape)
+    print(molecule.forces.shape)
+    print(molecule.energies.shape)
+    n_train = len(molecule_train.coords)
+    n_test = len(molecule_test.coords)
+    '''
+
+
+
     #write pdb file for first frame
     Writer.write_pdb(molecule.coords[0], 'MOL', 1, molecule.atoms, 
             'molecule.pdb', 'w')
 
+    '''
+    sorted_i = np.argsort(molecule.energies.flatten())
+    lowest_e_coords = molecule.coords[sorted_i[0]].reshape(1,-1,3)
+    Molecule.permutation_sort(molecule.atoms, lowest_e_coords, None, 
+            molecule.coords)
+    #Converter.get_simultaneous_interatomic_energies_forces(molecule, 
+            #bias_type='1/r')
+    #print(molecule.mat_NRF[0])
+    sys.exit()
+    '''
+
+
+    '''
+    #for Neil
+    sorted_i = np.argsort(molecule.energies.flatten())
+    lowest_e_coords = molecule.coords[sorted_i[0]]
+    np.savetxt('molecule_reference_c.dat', (lowest_e_coords).reshape(-1,3))
+    #train_coords = np.take(molecule.coords, molecule.train, axis=0)
+    #np.savetxt('malonaldehyde_testset_c.dat', (train_coords).reshape(-1,3))
+    #np.savetxt('malonaldehyde_testset_f.dat', (train_forces).reshape(-1,3))
+    np.savetxt('molecule_testset_c.dat', (molecule.coords).reshape(-1,3))
+    np.savetxt('molecule_testset_f.dat', (molecule.forces).reshape(-1,3))
+    np.savetxt('molecule_reference_z.dat', (molecule.atoms), fmt='%s')
+    sys.exit()
+    '''
 
     '''
     for Rs in range(1):
@@ -334,6 +388,16 @@ def run_force_pred(input_files='input_files',
             'training set is {} points'.format(train))
     Molecule.make_train_test_old(molecule, molecule.energies.flatten(), 
             split) #get train and test sets
+
+    '''
+    print('Hardcoded glycol training/test')
+    molecule.train = np.array(range(n_train))
+    molecule.test = np.array(range(n_test)) + n_train
+    print(molecule.train)
+    print(molecule.test)
+    #sys.exit()
+    '''
+
     '''
     print('!!!use regularly spaced training')
     molecule.train = np.arange(2, len(molecule.coords), split).tolist() 
@@ -360,8 +424,37 @@ def run_force_pred(input_files='input_files',
     train_forces = np.take(molecule.forces, molecule.train, axis=0)
     train_energies = np.take(molecule.energies, molecule.train, axis=0)
 
+
+
+     
+    
+    '''
+    #!!!! reordering training set atoms as per Neil's scheme
+    print('\n!!!!Reordering training set with PermSort Scheme\n')
+    new_order = np.loadtxt(
+            #'orders/malonaldehyde_ordered_trainingset_atomorder.dat'
+            #'../revised_data/malonaldehyde_ordered_testset_atomorder.dat',
+            #'../revised_data/molecule_ordered_testset_atomorder.dat',
+            'molecule_ordered_testset_atomorder.dat',
+            dtype=int)-1
+    new_order = np.expand_dims(new_order, axis=2)
+    print(molecule.coords[-1])
+    print()
+    molecule.coords = np.take_along_axis(molecule.coords, new_order, axis=1)
+    print(molecule.coords[-1])
+    molecule.forces = np.take_along_axis(molecule.forces, new_order, axis=1)
+    
+    #train_coords = np.take(molecule.coords, molecule.train, axis=0)
+    #train_coords = np.take_along_axis(train_coords, new_order, axis=1)
+    #molecule.coords[molecule.train] = train_coords
+    #train_forces = np.take(molecule.forces, molecule.train, axis=0)
+    #train_forces = np.take_along_axis(train_forces, new_order, axis=1)
+    #molecule.forces[molecule.train] = train_forces
+    #sys.exit()
+    '''
+
     ###!!!!!!!!
-    #print('!!!TRAIN OVER-RIDDEN FRO SCALING')
+    #print('!!!TRAIN OVER-RIDDEN FOR SCALING')
     #train_forces = molecule.forces
     #train_energies = molecule.energies
 
@@ -441,9 +534,41 @@ def run_force_pred(input_files='input_files',
     print('prescale value:', prescale)
     sys.stdout.flush()
 
+    '''
+    for x in range(1):
+        print('x', x)
+        print('F', molecule.forces[x])
+        print('E', molecule.energies[x])
+        Converter(molecule) #to get mat_F
+        print('mat_F', molecule.mat_F[x])
+        bias_type='0'
+        Converter.get_simultaneous_interatomic_energies_forces(
+                molecule, bias_type)
+        print('recomp from FE with dot {}'.format(bias_type))
+        recompF = np.dot(molecule.mat_eij[x][:-1], molecule.mat_FE[x])
+        recompE = np.dot(molecule.mat_bias[x], molecule.mat_FE[x])
+        print('recompF', recompF.reshape(-1,3))
+        print('recompE', recompE)
+        print('mat_FE', molecule.mat_FE[x])
+        bias_type='r'
+        Converter.get_simultaneous_interatomic_energies_forces(
+                molecule, bias_type)
+        print('recomp from FE with dot {}'.format(bias_type))
+        recompF = np.dot(molecule.mat_eij[x][:-1], molecule.mat_FE[x])
+        recompE = np.dot(molecule.mat_bias[x], molecule.mat_FE[x])
+        print('recompF', recompF.reshape(-1,3))
+        print('recompE', recompE)
+        print('mat_FE', molecule.mat_FE[x])
+        print('mat_bias', molecule.mat_bias[x])
+        print()
+
+
+    print(datetime.now() - startTime)
+    sys.stdout.flush()
 
     #Converter(molecule) #get pairwise forces
-    #sys.exit()
+    sys.exit()
+    '''
 
     #get atomwise decomposed forces and NRF inputs
     get_atomF = False
@@ -480,7 +605,7 @@ def run_force_pred(input_files='input_files',
         #sys.exit()
 
     get_decompE = False
-    bias_type = '1/r' # 'NRF' # 'qq/r2' #
+    bias_type = '1/r' # 'NRF' # 'qq/r2' #'r' #
     print('\nenergy bias type: {}'.format(bias_type))
     if get_decompE:
         print('\nget mat_E')
@@ -796,9 +921,11 @@ def run_force_pred(input_files='input_files',
         coords = molecule.coords[0:3].reshape(-1, n_atoms, 3)
         F = molecule.forces[0:3].reshape(-1, n_atoms, 3)
         E = molecule.energies[0:3].reshape(-1, 1)
+        mat_FE = molecule.mat_FE[0:3].reshape(3, -1)
         coords = tf.convert_to_tensor(coords, np.float32)
         F = tf.convert_to_tensor(F, np.float32)
         E = tf.convert_to_tensor(E, np.float32)
+        mat_FE = tf.convert_to_tensor(mat_FE, np.float32)
         F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
         FE = tf.concat([F_reshaped, E], axis=1)
         #print('FE', FE.shape)
@@ -813,14 +940,25 @@ def run_force_pred(input_files='input_files',
         a = tf.expand_dims(coords, 2)
         b = tf.expand_dims(coords, 1)
         diff = a - b
+        print('diff', diff.shape)
         diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
+        print('diff2', diff2.shape)
         #flatten diff2 so that _NC2 values are left
         tri = tf.linalg.band_part(diff2, -1, 0) #lower
         nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
         nonzero_values = tf.gather_nd(tri, nonzero_indices)
         diff_flat = tf.reshape(nonzero_values, 
                 shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        print('diff_flat', diff_flat.shape)
         r_flat = diff_flat**0.5
+
+
+        #for cutoff 
+        rc = 4
+        r_flat = tf.where(tf.math.greater(r_flat, rc), tf.zeros_like(r_flat), 
+                r_flat) #set rs grater than rc too zero
+
+
         au2kcalmola = 627.5095 * 0.529177
         au2kcalmola = tf.constant(au2kcalmola, dtype=tf.float32)
         _NRF = ((atoms_flat) / (r_flat ** 2))
@@ -851,23 +989,38 @@ def run_force_pred(input_files='input_files',
 
 
         print('_NRF', _NRF.shape)
+        _NRF = tf.where(tf.math.is_inf(_NRF), tf.zeros_like(_NRF), 
+                _NRF) #remove infs 
         print(sess.run(_NRF))
         print(molecule.mat_NRF[:3])
 
 
         #FOR ENERGY get energy 1/r_ij eij matrix
         recip_r = 1 / r_flat
+
+        if rc != 0:
+            recip_r = tf.where(tf.math.is_inf(recip_r), 
+                    tf.zeros_like(recip_r), recip_r) #remove infs 
+
         recip_r2 = 1 / r_flat ** 2
+
+        if rc != 0:
+            recip_r2 = tf.where(tf.math.is_inf(recip_r2), 
+                    tf.zeros_like(recip_r2), recip_r2) #remove infs 
+
+
         if bias_type == '1/r':
             eij_E = tf.expand_dims(recip_r, 1)
+        if bias_type == 'r':
+            eij_E = tf.expand_dims(r_flat, 1)
         if bias_type == 'qq/r2':
             eij_E = tf.expand_dims(_NRF, 1)
         #print('eij_E', sess.run(eij_E))
         norm_recip_r = tf.reduce_sum(recip_r2, axis=1) ** 0.5
         norm_recip_r = tf.expand_dims(norm_recip_r, 1)
         norm_recip_r = tf.expand_dims(norm_recip_r, 2)
-        #print('!!!!!! normalising eij_E with norm(1/R)')
-        #eij_E = eij_E / norm_recip_r
+        print('!!!!!! normalising eij_E with norm(1/R)')
+        eij_E = eij_E / norm_recip_r
         #print('norm', sess.run(norm_recip_r))
         #sys.exit()
 
@@ -903,11 +1056,19 @@ def run_force_pred(input_files='input_files',
                 new_eij_F.append(s)
 
         eij_F = tf.stack(new_eij_F)
+        #print('eij_F', eij_F.shape)
+        #print(sess.run(eij_F))
         #eij_F = eij_F * recip_r2
         #print('!!! 1/r2 bias included to eij_F matrix')
         eij_F = tf.transpose(eij_F, perm=[1,0,2])
         eij_FE = tf.concat([eij_F, eij_E], axis=1)
-
+        if rc != 0:
+            eij_FE = tf.where(tf.math.is_inf(eij_FE), tf.zeros_like(eij_FE), 
+                    eij_FE) #remove infs 
+            eij_FE = tf.where(tf.math.is_nan(eij_FE), tf.zeros_like(eij_FE), 
+                    eij_FE) #remove nans 
+        print('eij_FE', eij_FE.shape)
+        print(sess.run(eij_FE))
 
         inv_eij = tf.linalg.pinv(eij_FE)
         qs = tf.linalg.matmul(inv_eij, tf.transpose(FE))
@@ -918,13 +1079,70 @@ def run_force_pred(input_files='input_files',
         print('qs', qs.shape)
         print(sess.run(qs))
         print()
+        print('mat_FE', molecule.mat_FE[0:3].shape)
         print(molecule.mat_FE[0:3])
         print('max_FE', np.max(np.abs(molecule.mat_FE.flatten())))
 
 
+        if molecule.mat_FE.shape[1] == _NC2+1:
+            #ones = tf.ones([tf.shape(r_flat)[0], 1], dtype=tf.float32)
+
+            ones = tf.ones_like(r_flat)
+            ones = tf.reshape(ones[:,0], shape=(-1, 1))
+            r_flat_test = tf.concat([r_flat, ones], 1)
+            print(r_flat.shape, ones.shape, r_flat_test.shape)
+
+            recip_r_flat = 1 / r_flat_test
+            print(sess.run(recip_r_flat))
+
+            if rc != 0:
+                recip_r_flat = tf.where(tf.math.is_inf(recip_r_flat), 
+                        tf.zeros_like(recip_r_flat), 
+                        recip_r_flat) #remove infs 
+                recip_r_flat = tf.where(tf.math.is_nan(recip_r_flat), 
+                        tf.zeros_like(recip_r_flat), 
+                        recip_r_flat) #remove nans 
+
+            norm_recip_r = tf.reduce_sum(recip_r_flat ** 2, axis=1, 
+                    keepdims=True) ** 0.5
+            r_flat_test = recip_r_flat / norm_recip_r
+
+            print(r_flat_test.shape, tf.transpose(mat_FE).shape)
+            print(sess.run(r_flat_test))
+
+            E_test = tf.linalg.matmul(r_flat_test, tf.transpose(mat_FE))
+            print(r_flat_test.shape, tf.transpose(mat_FE).shape)
+            E_test = tf.linalg.diag_part(E_test) #only choose diags
+            print('*****', 'E_test', E_test.shape)
+            print(sess.run(E_test))
+            E_test2 = tf.einsum('bi, ib -> b', r_flat_test, tf.transpose(mat_FE))
+            print('*****', 'E_test2', E_test2.shape)
+            print(sess.run(E_test2))
+            print('E', molecule.energies[0:3])
+            print('mat_bias', molecule.mat_bias[:3])
+            print('*****', 'bias tf', r_flat_test.shape)
+            print(sess.run(r_flat_test))
+
+        if molecule.mat_FE.shape[1] == _NC2+n_atoms:
+            r_tri = Triangle(r_flat)
+            sumrs = (tf.reduce_sum(r_tri, 1)) / n_atoms #recip
+            r_flat_test = tf.concat([r_flat, sumrs], 1) 
+            E_test = tf.einsum('bi, ib -> b', r_flat_test, tf.transpose(mat_FE))
+            E_test = tf.reshape(E_test, shape=(tf.shape(tri)[0], 1)) 
+                    #need to define shape
+            print('*****', 'E_test3', E_test.shape)
+            print(sess.run(E_test))
+            E_test2 = tf.reduce_sum(mat_FE, 1, keepdims=True)
+            print('*****', 'E_test4', E_test2.shape)
+            print(sess.run(E_test2))
 
         if bias_type == '1/r':
-            Q3 = Triangle(recip_r)
+            #Q3 = Triangle(recip_r)
+            norm_recip_r = tf.reduce_sum(recip_r ** 2, axis=1, keepdims=True) ** 0.5
+            norm_recip_r = recip_r / norm_recip_r
+            Q3 = Triangle(norm_recip_r)
+        if bias_type == 'r':
+            Q3 = Triangle(r_flat)
         if bias_type == 'qq/r2':
             Q3 = Triangle(_NRF)
         #Q3 = Triangle(_NRF)
@@ -944,6 +1162,7 @@ def run_force_pred(input_files='input_files',
 
 
         print(datetime.now() - startTime)
+        sys.stdout.flush()
         #sys.exit()
 
 
@@ -975,6 +1194,7 @@ def run_force_pred(input_files='input_files',
             print(molecule.energies[i])
             n_atoms = len(molecule.atoms)
             _NC2 = int(n_atoms*(n_atoms-1)/2)
+            '''
             recompF, recompE = Converter.get_recomposed_FE(
                     [molecule.coords[i]], 
                     [molecule.mat_FE[i]], 
@@ -983,6 +1203,7 @@ def run_force_pred(input_files='input_files',
             print('\nrecomp from FE')
             print(recompF)
             print(recompE)
+            '''
             print('\nrecomp from FE with dot')
             #recompF = np.dot(molecule.mat_eij[i][:-1], molecule.mat_FE[i] / 
                     #molecule.mat_eij[i][-1]) #add back bias
@@ -999,7 +1220,7 @@ def run_force_pred(input_files='input_files',
             '''
 
 
-        #'''
+        '''
         lower_mask = np.tri(n_atoms, dtype=bool, k=-1) #True False mask
         #print(lower_mask)
         out = np.zeros((n_atoms, n_atoms))
@@ -1032,7 +1253,7 @@ def run_force_pred(input_files='input_files',
         print(molecule.atoms)
         print('sum atomFE', np.sum(atomFE))
         print('atomNRF', molecule.atomNRF[0])
-        #'''
+        '''
 
         print(datetime.now() - startTime)
         sys.stdout.flush()

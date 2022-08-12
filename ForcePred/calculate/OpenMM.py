@@ -40,8 +40,8 @@ class OpenMM(object):
         '''setup system for MD with OpenMM'''
 
         gaff = False
-        mlff = False
-        mlmm = True
+        mlff = True
+        mlmm = False
         force = None
 
         if mlmm:
@@ -228,10 +228,15 @@ class OpenMM(object):
 
         print(system.getDefaultPeriodicBoxVectors())
 
+        ##!!!!!!!!! CHECK THIS WORKS:
+        #system.setNonbondedMethod(PME)
+        #system.setCutoffDistance(0.8*nanometer)
+
+
         ## setup simulation conditions
         ts = (0.5*femtoseconds).in_units_of(picoseconds) #1 ps == 1e3 fs
         coupling = 1 #50 #2 and 100K, 50 and 300K 
-        temperature = 300 #300 #500 #300
+        temperature = 500 #300 #500 #300
         print('temperature {}K coupling {} ps^-1'.format(temperature, 
             coupling))
 
@@ -321,7 +326,7 @@ class OpenMM(object):
             init_forces, prescale):
         '''Run MD with OpenMM for nsteps'''
 
-        mlmm = True
+        mlmm = False
         NVT = False
         if NVT:
             #set temperature for integrator
@@ -430,8 +435,8 @@ class OpenMM(object):
                 getPositions=True).getPositions(
                 asNumpy=True).in_units_of(angstrom) #in angstrom
 
-        mlff = False
-        mlmm = True
+        mlff = True
+        mlmm = False
         equiv_atoms = False
         conservation = False
         from_FE = True

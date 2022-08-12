@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import matplotlib.colors as colors
 from scipy.interpolate import interp1d
+from scipy.stats import gaussian_kde #density
 
 class Plotter(object):
     '''
@@ -24,14 +25,15 @@ class Plotter(object):
         ax.set_ylabel(ylabel, fontsize=Plotter.axis_labels, weight='medium')
         ### ticks
         #ax.yaxis.set_major_locator(plt.MaxNLocator(7))
-        #ax.xaxis.set_major_locator(plt.MaxNLocator(7))
+        #ax.xaxis.set_major_locator(plt.MaxNLocator(3))
         ax.tick_params(axis='both', which='both', direction='out', 
                 length=8, width=3, colors='k',
                 grid_color='k', labelsize=Plotter.tick_labels,
-                bottom=True, top=True, left=True, right=True)
+                #bottom=True, top=True, left=True, right=True
+                )
         ### axes labelling
-        ax.tick_params(labelbottom=True, labeltop=False, 
-                labelleft=True, labelright=False)
+        #ax.tick_params(labelbottom=True, labeltop=False, 
+                #labelleft=True, labelright=False)
         ### axes thickness
         for axis in ['top', 'bottom', 'left', 'right']:
             ax.spines[axis].set_linewidth(3)
@@ -43,20 +45,23 @@ class Plotter(object):
         #ax.set_xlim(-180, 180)
 
         ### fix aspect ratio as square
-        #x0,x1 = ax.get_xlim()
-        #y0,y1 = ax.get_ylim()
-        #ax.set_aspect(abs(x1-x0)/abs(y1-y0))
-        ax.set_aspect('auto') #newer matplotlib version
+        x0,x1 = ax.get_xlim()
+        y0,y1 = ax.get_ylim()
+        ax.set_aspect(abs(x1-x0)/abs(y1-y0))
+        #ax.set_aspect('auto') #newer matplotlib version
 
     def colorbar(fig, ax, sc, zlabel):
-        cbar = fig.colorbar(sc,ax=ax, 
+        cbar = fig.colorbar(sc,
+                cax=ax, 
+                #ax=ax, 
                 fraction=0.046, pad=0.04, #size of legend
-                #format='%.4f',
+                #format='%.2f',
                 )
         cbar.ax.tick_params(direction='out', length=6, width=3, 
                 colors='k', labelsize=Plotter.tick_labels)
         cbar.ax.set_ylabel(zlabel, size=Plotter.tick_labels)
         cbar.ax.yaxis.offsetText.set_fontsize(Plotter.tick_labels-6)
+        #cbar.ax.locator_params(nbins=3) #relates to ticks
         #cbar.ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         cbar.outline.set_visible(False)
 
@@ -169,7 +174,15 @@ class Plotter(object):
                     #vmin=0.5, vmax=1,
                     #vmin=cm_min, vmax=cm_max,
                     )
+
+
         Plotter.format(ax, x, y, xlabel, ylabel)
+        #fig.colorbar(sc[3], ax=ax)
+        cb_ax = fig.add_axes([0.95, 0.12, 0.05, 0.75])
+        Plotter.colorbar(fig, cb_ax, sc[3], '$N_\mathrm{structures}$')
+        #cbar = fig.colorbar(sc[3], cax=cb_ax)
+        #cbar.ax.tick_params(labelsize=Plotter.tick_labels)
+        #cbar.outline.set_linewidth(3)
         fig.savefig('%s' % (plot_name), 
                 #transparent=True, 
                 bbox_inches='tight'
@@ -187,12 +200,16 @@ class Plotter(object):
         ax.set_xscale('log')
         ax.xaxis.set_tick_params(direction='in', which='both')
         ax.yaxis.set_tick_params(direction='in', which='both')
+        ax.grid(color='grey', linestyle='--', which='major', 
+                axis='both', linewidth=1)
         #lgd = Plotter.get_legend(ax, lines, label_list)
+        #'''
         lgd = ax.legend(
-                loc='upper right', 
+                loc='upper left', bbox_to_anchor=(1.1, 1), 
                 #loc='lower right', 
                 prop={'size': Plotter.tick_labels+4})
         lgd.get_frame().set_alpha(0)
+        #'''
         fig.savefig('%s' % (plot_name), 
                 #transparent=True,
                 #bbox_extra_artists=(lgd,),
@@ -201,50 +218,81 @@ class Plotter(object):
         plt.close(plt.gcf())
 
 
-    def twinx_plot(x_list, y_list, label_list, color_list, 
-            xlabel, ylabel, ylabel2, size_list, plot_name):
+    def twinx_plot(x_list, y_list, label_list, color_list, ls_list, 
+            marker_list, xlabel, ylabel, ylabel2, size_list, axis_list, 
+            func, plot_name):
         '''Only for two differing scales'''
         fig, ax = plt.subplots(figsize=(10, 10), 
                 edgecolor='k') #all in one plot
+        ax2 = ax.twinx()
 
         lines = []
         lines2 = []
         count = 0
-        for x, y, size, label, c in zip(x_list, y_list, size_list, 
-                label_list, color_list):
+        for x, y, size, a, label, c, ls, m in zip(x_list, y_list, size_list, 
+                axis_list, label_list, color_list, ls_list, marker_list):
+            inds2 = x.argsort()
+            x = x[inds2]
+            y = y[inds2]
             print('***', len(x), len(y))
-            if count%2 == 0:
+            print('---', x, y)
+            print()
+            if a == 1:
                 line = ax.scatter(x, y, label=label, 
-                        s=size, facecolors=c, #'none', 
-                        edgecolors=c, #lw=2,
+                        s=size, facecolors='none', #c, #
+                        edgecolors=c, marker=m, lw=2,
                         )
-            if count%2 != 0:
-                if count == 1:
-                    ax2 = ax.twinx()
+            if a == 2:
                 line = ax2.scatter(x, y, label=label, 
-                        s=size, facecolors=c, #'none', 
-                        edgecolors=c, #lw=2,
+                        s=size, facecolors=c, #'none', #
+                        edgecolors=c, marker=m, lw=3,
                         )
             lines.append(line)
 
-            xnew = np.linspace(x.min(), x.max(), 300)
-            f_smooth = interp1d(x, y, kind='cubic')
-            if count%2 == 0:
-                line2 = ax.plot(xnew, f_smooth(xnew), c=c, lw=3, label=label)
-            if count%2 != 0:
-                line2 = ax2.plot(xnew, f_smooth(xnew), c=c, lw=3, label=label)
+            x2, inds = np.unique(x, return_index=True)
+            x_unique = x[inds]
+            y_unique = y[inds]
+            xnew = np.linspace(x_unique.min(), x_unique.max(), 1000)
+            f_smooth = interp1d(x_unique, y_unique, kind=2)
+            poly = np.polyfit(x_unique,y_unique,5)
+            poly_y = np.poly1d(poly)(xnew)
+            if func == 'f':
+                curve = f_smooth(xnew)
+                #poly = np.polyfit(x_unique,y_unique,27)
+                #poly_y = np.poly1d(poly)(xnew)
+                #curve = poly_y
+            if func  == 'p':
+                curve = poly_y
+            if a == 1:
+                line2 = ax.plot(xnew, 
+                        #f_smooth(xnew), 
+                        curve, 
+                        c=c, lw=2, ls=ls,
+                        #label=label
+                        )
+            if a == 2:
+                line2 = ax2.plot(xnew, 
+                        #f_smooth(xnew), 
+                        curve, 
+                        c=c, lw=3, ls=ls,
+                        #label=label
+                        )
             lines2.append(line2)
             count += 1
 
-        plt.grid(color='grey', linestyle='-', which='major', 
-                linewidth=2)
-        ax2.set_ylabel(ylabel2, fontsize=Plotter.axis_labels, 
-                weight='medium')
 
+        #ax2.set_ylabel(ylabel2, fontsize=Plotter.axis_labels, 
+                #weight='medium')
 
+        Plotter.format(ax2, x, y, xlabel, ylabel2)
         Plotter.format(ax, x, y, xlabel, ylabel)
-        #lgd = Plotter.get_legend(ax, lines, label_list)
-        lgd = ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
+        #ax2.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+        #ax2.yaxis.offsetText.set_fontsize(Plotter.tick_labels)
+        ax.grid(color='grey', linestyle='--', which='major', 
+                axis='both', linewidth=1)
+        labs = [l.get_label() for l in lines]
+        lgd = ax.legend(lines, labs, bbox_to_anchor=(1.1, 1), 
+                loc='upper left', 
                 prop={'size': Plotter.tick_labels+4})
         lgd.get_frame().set_alpha(0)
         fig.savefig('%s' % (plot_name), 
@@ -270,12 +318,39 @@ class Plotter(object):
             lines.append(line)
         Plotter.format(ax, x, y, xlabel, ylabel)
         #lgd = Plotter.get_legend(ax, lines, label_list)
+        '''
         lgd = ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
                 prop={'size': Plotter.tick_labels+4})
         lgd.get_frame().set_alpha(0)
+        '''
         fig.savefig('%s' % (plot_name), 
                 #transparent=True,
                 #bbox_extra_artists=(lgd,),
                 bbox_inches='tight',
                 )
         plt.close(plt.gcf())
+
+
+
+    def xy_scatter_density(x, y, xlabel, ylabel, plot_name):
+        # Calculate the point density
+        xy = np.vstack([x,y])
+        z = gaussian_kde(xy)(xy)
+
+        # Sort the points by density, so that the densest points are plotted last
+        idx = z.argsort()
+        x, y, z = x[idx], y[idx], z[idx]
+
+        fig, ax = plt.subplots()
+        cm = plt.cm.get_cmap('jet')
+        sc = ax.scatter(x, y, c=z, s=50, cmap=cm)
+        Plotter.format(ax, x, y, xlabel, ylabel)
+        cb_ax = fig.add_axes([0.83, 0.12, 0.05, 0.75])
+        Plotter.colorbar(fig, cb_ax, sc, 'Density')
+        fig.savefig('%s' % (plot_name), 
+                #transparent=True,
+                #bbox_extra_artists=(lgd,),
+                bbox_inches='tight',
+                )
+        plt.close(plt.gcf())
+        

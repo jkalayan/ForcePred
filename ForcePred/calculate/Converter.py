@@ -6,7 +6,7 @@ into pair-wise and nuclear repulsive forces respectively.
 '''
 
 import numpy as np
-#import sys
+import sys
 #from ..network.Network import Network
 
 class Converter(object):
@@ -400,19 +400,28 @@ class Converter(object):
         equation'''
 
         force_bias = True
+        norm = True
 
         n_atoms = len(molecule.atoms)
+        extra_cols = 1 #n_atoms #1 #
         _NC2 = int(n_atoms * (n_atoms-1)/2)
+        rc = 4
         n_structures = len(molecule.coords)
         molecule.mat_NRF = np.zeros((n_structures, _NC2))
         molecule.mat_r = np.zeros((n_structures, _NC2))
-        molecule.mat_bias = np.zeros((n_structures, _NC2))
-        molecule.mat_FE = np.zeros((n_structures, _NC2))
-        molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, _NC2))
+        #molecule.mat_bias = np.zeros((n_structures, _NC2))
+        #molecule.mat_FE = np.zeros((n_structures, _NC2))
+        #molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, _NC2))
+        molecule.mat_bias = np.zeros((n_structures, _NC2+extra_cols))
+        molecule.mat_FE = np.zeros((n_structures, _NC2+extra_cols))
+        molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, 
+                _NC2+extra_cols))
+
         molecule.vector_NRF = np.zeros((n_structures, 3, _NC2))
         for s in range(n_structures):
             #mat_r = np.zeros((_NC2))
-            mat_Fvals = np.zeros((n_atoms, 3, _NC2))
+            #mat_Fvals = np.zeros((n_atoms, 3, _NC2))
+            mat_Fvals = np.zeros((n_atoms, 3, _NC2+extra_cols))
             com = np.sum(molecule.coords[s], axis=0) / n_atoms
             #vector_NRF = np.zeros((3, _NC2))
             _N = -1
@@ -423,9 +432,10 @@ class Converter(object):
                     zj = molecule.atoms[j]
                     r = Converter.get_r(molecule.coords[s][i], 
                             molecule.coords[s][j])
+                    if r > rc and rc != 0:
+                        r = 0
                     #mat_r[_N] = r
                     molecule.mat_r[s,_N] = r
-                    rc = 3
                     '''
                     if r < rc:
                         r2 = 0.5 * np.cos(np.pi * r / rc) + 0.5
@@ -447,6 +457,9 @@ class Converter(object):
                         #if r < rc:
                             #bias = 0.5 * np.cos(np.pi * r / rc) + 0.5
                     molecule.mat_bias[s,_N] = bias
+                    if extra_cols == n_atoms:
+                        molecule.mat_bias[s][_NC2+i] += (r) / n_atoms #zi * zj/ r / n_atoms
+                        molecule.mat_bias[s][_NC2+j] += (r) / n_atoms #zi * zj /r / n_atoms
                     molecule.mat_eij[s,n_atoms*3,_N] = bias
                     for x in range(0, 3):
                         val = ((molecule.coords[s][i][x] - 
@@ -459,48 +472,107 @@ class Converter(object):
                         mat_Fvals[j,x,_N] = -val
                         molecule.mat_eij[s,i*3+x,_N] = val
                         molecule.mat_eij[s,j*3+x,_N] = -val
+
                         val2 = ((molecule.coords[s][i][x] - 
                                 molecule.coords[s][j][x]) / 
                                 molecule.mat_r[s,_N] ** 2)
                         molecule.vector_NRF[s,x,_N] = val2 * zi * zj
 
-            mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2)
+            #mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2)
+            mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2+extra_cols)
             forces2 = molecule.forces[s].reshape(n_atoms*3)
             #decomp_F = np.matmul(np.linalg.pinv(mat_Fvals2), forces2)
 
-            mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2))
-            #norm_recip_r = np.sum((1 / molecule.mat_r[s]) ** 2) ** 0.5
+            #mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2))
+            if extra_cols == 1:
+                molecule.mat_bias[s][_NC2:] = 1
+            if norm:
+                norm_recip_r = np.sum(molecule.mat_bias[s] ** 2) ** 0.5
+                molecule.mat_bias[s] = molecule.mat_bias[s] / norm_recip_r
+
+
+            '''
+            print(molecule.mat_r[s])
+            print(molecule.mat_bias[s])
+            molecule.mat_bias[s] = np.where(np.isnan(molecule.mat_bias[s]), 
+                    np.zeros_like(molecule.mat_bias[s]), 
+                    molecule.mat_bias[s]) #remove nans
+            print(molecule.mat_bias[s])
+            sys.exit()
+            '''
+
+            #molecule.mat_bias[s] = np.where(np.isinf(molecule.mat_bias[s]), 
+                    #np.zeros_like(molecule.mat_bias[s]), 
+                    #molecule.mat_bias[s]) #remove infs
+            #molecule.mat_bias[s][np.isinf(molecule.mat_bias[s])] = 0
+            #molecule.mat_bias[s][molecule.mat_bias[s] == np.inf] = 0
+            #ndarray[np.isinf(ndarray)] = 0
+            #np.nan_to_num(molecule.mat_bias[s], copy=False, nan=0.0, 
+                    #posinf=0.0, neginf=0.0)
+            #np.ma.masked_array(molecule.mat_bias[s], 
+                    #~np.isfinite(molecule.mat_bias[s])).filled(0)
+            mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2+extra_cols))
+
             #norm_NRF = np.sum((molecule.mat_NRF[s]) ** 2) ** 0.5
             #mat_bias2 = mat_bias2 / norm_NRF ###!!!!normalising eij_E
+            #if bias_type == 'r':
+                #norm_r = np.sum((molecule.mat_r[s]) ** 2) ** 0.5
+                #mat_bias2 = mat_bias2 / norm_r
+
             _E = molecule.energies[s].reshape(1)
             #decomp_E = np.matmul(np.linalg.pinv(mat_bias2), _E)
 
 
             mat_FE = np.concatenate((mat_Fvals2, mat_bias2), axis=0)
             _FE = np.concatenate([forces2.flatten(), _E.flatten()])
+            if rc != 0:
+                for f in mat_FE:
+                    f[f == np.inf] = 0
+                    f[f == -np.inf] = 0
+                _NRF = molecule.mat_NRF[s]
+                _NRF[_NRF == np.inf] = 0
+                _NRF[_NRF == -np.inf] = 0
+                molecule.mat_NRF[s] = _NRF
+
+
+
             decomp_FE = np.matmul(np.linalg.pinv(mat_FE), _FE)
 
+
+            '''
             if s == 0:
                 print('mat_bias\n', molecule.mat_bias[s])
                 print('mat_eij\n', molecule.mat_eij[s])
                 print('bias_type', bias_type)
                 print('decomp_FE', decomp_FE)
                 #print('norm_recip_r', norm_recip_r)
+            '''
 
             '''
             #rescale using E bias only, doesn't work for forces
-            _N2 = -1
-            for i in range(n_atoms):
-                for j in range(i):
-                    _N2 += 1
-                    decomp_FE[_N2] *= molecule.mat_bias[s,_N2]
-                    #if force_bias:
-                        #decomp_FE[_N2] *= molecule.mat_bias[s,_N2]
-                    molecule.mat_bias[s,_N2] = 1
+            if bias_type != '0':
+                _N2 = -1
+                for i in range(n_atoms):
+                    for j in range(i):
+                        _N2 += 1
+                        decomp_FE[_N2] *= molecule.mat_bias[s,_N2]
+                        #if force_bias:
+                            #decomp_FE[_N2] *= molecule.mat_bias[s,_N2]
+                        molecule.mat_bias[s,_N2] = 1
+                for k in range(extra_cols):
+                    decomp_FE[_NC2+k] *= molecule.mat_bias[s,_NC2+k]
+                    molecule.mat_bias[s,_NC2+k] = 1
+
             '''
 
 
             molecule.mat_FE[s] = decomp_FE
+            '''
+            if s == 0:
+                print('mat_FE', molecule.mat_FE[s])
+                print('sum_mat_FE', np.sum(molecule.mat_FE[s]))
+                print('E', molecule.energies[s])
+            '''
 
 
     def get_simultaneous_interatomic_energies_forces2(atoms, coords, forces, 
@@ -765,26 +837,34 @@ class Converter(object):
 
     def get_bias(zA, zB, r, bias_type):
         bias = 1
+        if bias_type == '0':
+            bias = 0
         if bias_type == '1/r':
-            bias = 1 / r
+            #bias = 1 / r
+            bias = r and (1 / r) #Boolean op that allows zero division
         if bias_type == '1/r2':
             bias = 1 / r ** 2
+        if bias_type == '1/r3':
+            bias = 1 / r ** 3
         if bias_type == 'r':
             bias = r
         if bias_type == 'r2':
             bias = r ** 2
+        if bias_type == 'r3':
+            bias = r ** 3
         if bias_type == 'r/qq':
-            bias = r / zA * zB * Converter.au2kcalmola
+            bias = r / zA * zB #* Converter.au2kcalmola
         if bias_type == 'NRF':
             bias = Converter.get_NRF(zA, zB, r)
         if bias_type == '1/qqr2':
-            bias = 1 / zA * zB * Converter.au2kcalmola * r ** 2
+            bias = 1 / zA * zB * r ** 2
         if bias_type == 'qq/r2':
             bias = zA * zB / r ** 2
         return bias
 
     def get_NRF(zA, zB, r):
-        return zA * zB * Converter.au2kcalmola / (r ** 2)
+        _NRF = r and (zA * zB * Converter.au2kcalmola / (r ** 2))
+        return _NRF 
         #return zA * zB / (r ** 2) 
         #return 1 / (r ** 2) 
 
