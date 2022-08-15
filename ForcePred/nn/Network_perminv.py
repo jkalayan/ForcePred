@@ -568,7 +568,7 @@ class EijMatrix_test(Layer):
         recip_r_flat = 1 / r_flat_test
 
         #set rs greater than rc to zero
-        rc = 4
+        rc = 2
         recip_r_flat = tf.where(tf.math.less(recip_r_flat, 1/rc), 
                 tf.zeros_like(recip_r_flat), recip_r_flat) 
 

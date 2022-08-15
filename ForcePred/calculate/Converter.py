@@ -405,7 +405,7 @@ class Converter(object):
         n_atoms = len(molecule.atoms)
         extra_cols = 1 #n_atoms #1 #
         _NC2 = int(n_atoms * (n_atoms-1)/2)
-        rc = 4
+        rc = 2
         n_structures = len(molecule.coords)
         molecule.mat_NRF = np.zeros((n_structures, _NC2))
         molecule.mat_r = np.zeros((n_structures, _NC2))
@@ -529,13 +529,16 @@ class Converter(object):
                 for f in mat_FE:
                     f[f == np.inf] = 0
                     f[f == -np.inf] = 0
+                    f[np.isnan(f)] = 0
                 _NRF = molecule.mat_NRF[s]
                 _NRF[_NRF == np.inf] = 0
                 _NRF[_NRF == -np.inf] = 0
+                _NRF[np.isnan(_NRF)] = 0
                 molecule.mat_NRF[s] = _NRF
 
 
-
+            #for e in mat_FE:
+                #print(e)
             decomp_FE = np.matmul(np.linalg.pinv(mat_FE), _FE)
 
 
