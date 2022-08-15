@@ -918,10 +918,10 @@ def run_force_pred(input_files='input_files',
 
 
 
-        coords = molecule.coords[0:3].reshape(-1, n_atoms, 3)
-        F = molecule.forces[0:3].reshape(-1, n_atoms, 3)
-        E = molecule.energies[0:3].reshape(-1, 1)
-        mat_FE = molecule.mat_FE[0:3].reshape(3, -1)
+        coords = molecule.coords[0:20].reshape(-1, n_atoms, 3)
+        F = molecule.forces[0:20].reshape(-1, n_atoms, 3)
+        E = molecule.energies[0:20].reshape(-1, 1)
+        mat_FE = molecule.mat_FE[0:20].reshape(20, -1)
         coords = tf.convert_to_tensor(coords, np.float32)
         F = tf.convert_to_tensor(F, np.float32)
         E = tf.convert_to_tensor(E, np.float32)
@@ -952,6 +952,86 @@ def run_force_pred(input_files='input_files',
         print('diff_flat', diff_flat.shape)
         r_flat = diff_flat**0.5
 
+
+
+        ###for RAD matrix - if RAD neighbours 1, else 0
+
+        r_tri = diff2 ** 0.5
+        RAD = tf.zeros_like(r_tri)
+        print('r_tri', r_tri.shape)
+        print(sess.run(r_tri))
+        print()
+        for i in range(n_atoms):
+            print('i', i)
+            r = r_tri[:,i]
+            indices = tf.argsort(r)
+            sorted_r = tf.gather(r, indices, batch_dims=-1)
+            print('r\n', r.shape, sess.run(r))
+            print('sorted_r\n', sess.run(sorted_r))
+            print('indices\n', sess.run(indices))
+            blocked = []
+            blocked.append(tf.zeros_like(r[:,i])) #i-i term
+            for j in range (1, n_atoms):
+                #print('j', j)
+                j_indices = tf.reshape(indices[:,j], [-1,1])
+                #print('j_indices\n', j_indices.shape, sess.run(j_indices))
+                rij = tf.gather(r, indices=j_indices, axis=1, batch_dims=-1)
+                rij = tf.reshape(rij, [-1])
+                #print('rij\n', rij.shape, sess.run(rij))
+                blocked1 = tf.ones_like(r[:,i])
+                for k in range(1, j):
+                    #print('k', k)
+                    k_indices = tf.reshape(indices[:,k], [-1,1])
+                    #print('k_indices\n', sess.run(k_indices))
+                    rik = tf.gather(r, indices=k_indices, axis=1, batch_dims=-1)
+                    rik = tf.reshape(rik, [-1])
+                    #print('rik\n', rik.shape, sess.run(rik))
+                    rjk = tf.gather(r_tri, indices=j_indices, batch_dims=-1)
+                    rjk = tf.gather(rjk, indices=k_indices, axis=1, batch_dims=-1)
+                    rjk = tf.reshape(rjk, [-1])
+                    #print('rjk\n', rjk.shape, sess.run(rjk))
+                    costheta_jik = ((rjk ** 2 - rik ** 2 - rij ** 2) /
+                            (-2 * rik * rij))
+
+
+                    #print('costheta_jik\n', costheta_jik.shape, 
+                            #sess.run(costheta_jik))
+
+                    LHS = (1 / rij) ** 2 
+                    RHS = (((1 / rik) ** 2) * costheta_jik)
+                    #print('LHS\n', sess.run(LHS))
+                    #print('RHS\n', sess.run(RHS))
+
+                    ##set blocked neighbours to value 1
+                    blocked1 = tf.where(tf.math.less(LHS, RHS), 
+                            tf.zeros_like(blocked1), blocked1) 
+                    #print(i, j, k, 'blocked1\n', blocked1.shape, sess.run(blocked1))
+                blocked.append(blocked1)
+            blocked = tf.transpose(tf.stack(blocked))
+            print(i, 'blocked\n', sess.run(blocked))
+            sorted_indices = tf.argsort(indices)
+            blocked_sorted = tf.gather(blocked, indices=sorted_indices, 
+                    batch_dims=-1)
+            print('blocked_sorted\n', sess.run(blocked_sorted))
+
+            print()
+        sys.exit()
+
+
+
+
+        sys.exit()
+
+        #print(sess.run(r_tri))
+        ac = tf.expand_dims(r_tri, 1)
+        ba = tf.expand_dims(r_tri, 2)
+        bc = tf.expand_dims(r_tri, 3)
+        print('ac, ba, bc:', ac.shape, ba.shape, bc.shape)
+
+        cosine_angle = ((ac ** 2 - bc ** 2 - ba ** 2) / (-2 * bc * ba))
+        print('cosine_angle', cosine_angle)
+        print(sess.run(cosine_angle))
+        sys.exit()
 
         #for cutoff 
         rc = 4
