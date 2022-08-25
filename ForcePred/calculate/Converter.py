@@ -394,33 +394,158 @@ class Converter(object):
         return all_recomp_F
 
 
+    def get_RAD_neighbours(coords):
+        ''' get a RAD matrix - if RAD neighbours 1, else 0 
+        '''
+        n_atoms = coords.shape[1]
+        a = np.expand_dims(coords, 2)
+        b = np.expand_dims(coords, 1)
+        diff = a - b
+        diff2 = np.sum(diff**2, axis=-1) #get sqrd diff
+        # get all distances between atoms
+        r_tri = diff2 ** 0.5
+        RAD = []
+        for i in range(n_atoms):
+            r = r_tri[:,i]
+            # sort neighbours of i by closest distance
+            indices = np.argsort(r) #all neighbour atom ixs
+            #print('indices', indices+1)
+            sorted_r = r[:,indices[0]]
+            blocked = []
+            # set i-i neighbour to blocked
+            blocked.append(np.zeros_like(r[:,i])) #i-i term
+            for j in range (1, n_atoms):
+                # for all neighbours j of i, get distance rij
+                # closest neighbour is ignored as it will never be blocked
+                # thus stays set to 1, e.i. unblocked
+                j_indices = np.reshape(indices[:,j], (-1,1)) #neighbour j ixs
+                rij = r[:,j_indices[0]]
+                rij = np.reshape(rij, (-1))
+                # set all j'th neighbours initially as unblocked
+                blocked_j = np.ones_like(r[:,i])
+                for k in range(1, j):
+                    # for all neighbours of j that are closer to i,
+                    # get distance rik 
+                    k_indices = np.reshape(indices[:,k], (-1,1))
+                    rik = r[:,k_indices[0]]
+                    rik = np.reshape(rik, (-1))
+                    rjk = r_tri[:,j_indices[0]].reshape(-1,n_atoms)
+                    rjk = rjk[:,k_indices[0]]
+                    rjk = np.reshape(rjk, (-1))
+                    costheta_jik = ((rjk ** 2 - rik ** 2 - rij ** 2) /
+                            (-2 * rik * rij))
+                    theta = np.degrees(np.arccos(costheta_jik))
+                    # get each side of RAD eq
+                    LHS = (1 / rij) ** 2 
+                    RHS = (((1 / rik) ** 2) * costheta_jik)
+                    # set blocked neighbours to value 0 if LHS < RHS
+                    # i.e. k blocks j from i
+                    blocked_j = np.where(np.less(LHS, RHS), 
+                            np.zeros_like(blocked_j), blocked_j)
+                    #print(i+1, j_indices+1, k_indices+1, rij, rik, 
+                            #theta, costheta_jik,
+                            #LHS, RHS, LHS < RHS, blocked_j)
+                # append all j'th neighbours of i
+                blocked.append(blocked_j)
+                #print()
+            blocked = np.transpose(np.stack(blocked))
+            #print('blocked\n', blocked)
+            # sort all neighbours back to atom index order
+            sorted_indices = np.argsort(indices)
+            blocked_sorted = blocked[:,sorted_indices[0]]
+            RAD.append(blocked_sorted)
+        RAD = np.transpose(np.stack(RAD), (1,0,2))
+        # ensure neighbours are symmetric
+        RAD2 = np.transpose(np.stack(RAD), (0,2,1))
+        RAD3 = RAD + RAD2
+        # add neighbours rather than remove
+        RAD = np.where(np.greater(RAD3, 0), 
+                np.ones_like(RAD), RAD)
+        # remove neighbours rather than add
+        #RAD = np.where(np.equal(RAD3, 1), 
+                #np.zeros_like(RAD), RAD)
+        #print('\nRAD', RAD.shape)
+        #print(RAD)
+        #print()
+
+        # find neighbours of a neighbour (nn) and make them its neighbours
+        a = np.expand_dims(RAD, 3)
+        b = np.expand_dims(RAD, 2)
+        nn = a * b
+        nn = np.sum(nn, axis=1) + RAD
+        # make diag zeros to remove self neighbours
+        a_list = np.arange(n_atoms)
+        nn[:, a_list, a_list] = 0.
+        RAD = nn
+
+    
+        r_tri_RAD = r_tri * RAD
+        #flatten r so that _NC2 values are left
+        tri = np.tril(r_tri) #lower rs
+        tri2 = np.tril(r_tri_RAD) #lower RAD
+        nonzero_indices = np.where(np.not_equal(tri, np.zeros_like(tri)))
+        nonzero_values = tri2[nonzero_indices]
+        r_flat_RAD = np.reshape(nonzero_values, 
+                (np.shape(tri)[0], -1)) #reshape to _NC2
+        # replace zeros with ones
+        safe = np.where(np.equal(r_flat_RAD, 0.), 1., r_flat_RAD)
+        # 1/r and replace 1s with zeros
+        recip_r_flat_RAD = np.where(r_flat_RAD < 1., 0., 1. / safe)
+        #print('recip_r_flat_RAD', recip_r_flat_RAD.shape)
+        #print(recip_r_flat_RAD)
+        flat_RAD = np.where(r_flat_RAD < 1., 0., 1.)
+
+        '''
+        _N = 0
+        for i in range(n_atoms):
+            for j in range(i):
+                print(_N+1, i+1, j+1, flat_RAD[0][_N])
+                _N += 1
+        '''
+
+
+        return flat_RAD
+
+
+
     def get_simultaneous_interatomic_energies_forces(molecule, 
             bias_type='NRF'):
         '''Get decomposed energies and forces from the same simultaneous
         equation'''
 
-        force_bias = True
-        norm = True
-
         n_atoms = len(molecule.atoms)
-        extra_cols = 1 #n_atoms #1 #
         _NC2 = int(n_atoms * (n_atoms-1)/2)
-        rc = 2
         n_structures = len(molecule.coords)
+
+        force_bias = False
+        norm = True
+        use_RAD = True
+        extra_cols = 0 #n_atoms #1 #
+        rc = 0
+
         molecule.mat_NRF = np.zeros((n_structures, _NC2))
         molecule.mat_r = np.zeros((n_structures, _NC2))
-        #molecule.mat_bias = np.zeros((n_structures, _NC2))
-        #molecule.mat_FE = np.zeros((n_structures, _NC2))
-        #molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, _NC2))
         molecule.mat_bias = np.zeros((n_structures, _NC2+extra_cols))
         molecule.mat_FE = np.zeros((n_structures, _NC2+extra_cols))
         molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, 
                 _NC2+extra_cols))
+        molecule.flat_RAD = np.ones((n_structures, _NC2))
+
+        #molecule.flat_RAD = Converter.get_RAD_neighbours(
+                #molecule.coords[0].reshape((-1,n_atoms,3)))
+        #sys.exit()
+
+        if use_RAD:
+            molecule.flat_RAD = Converter.get_RAD_neighbours(molecule.coords)
+            #add extra cols to RAD
+            if extra_cols > 0: 
+                ones = np.ones_like(molecule.flat_RAD)
+                ones = np.reshape(ones[:,0:extra_cols], (-1, extra_cols))
+                molecule.flat_RAD = np.concatenate((molecule.flat_RAD, ones), 
+                        axis=1) 
 
         molecule.vector_NRF = np.zeros((n_structures, 3, _NC2))
         for s in range(n_structures):
-            #mat_r = np.zeros((_NC2))
-            #mat_Fvals = np.zeros((n_atoms, 3, _NC2))
             mat_Fvals = np.zeros((n_atoms, 3, _NC2+extra_cols))
             com = np.sum(molecule.coords[s], axis=0) / n_atoms
             #vector_NRF = np.zeros((3, _NC2))
@@ -434,7 +559,6 @@ class Converter(object):
                             molecule.coords[s][j])
                     if r > rc and rc != 0:
                         r = 0
-                    #mat_r[_N] = r
                     molecule.mat_r[s,_N] = r
                     '''
                     if r < rc:
@@ -465,8 +589,8 @@ class Converter(object):
                         val = ((molecule.coords[s][i][x] - 
                                 molecule.coords[s][j][x]) / 
                                 molecule.mat_r[s,_N])
-                        #if force_bias:
-                            #val *= bias
+                        if force_bias:
+                            val *= bias
                             #val *= 1/ (molecule.mat_r[s,_N] ** 2)
                         mat_Fvals[i,x,_N] = val
                         mat_Fvals[j,x,_N] = -val
@@ -477,6 +601,19 @@ class Converter(object):
                                 molecule.coords[s][j][x]) / 
                                 molecule.mat_r[s,_N] ** 2)
                         molecule.vector_NRF[s,x,_N] = val2 * zi * zj
+                    
+            if use_RAD:
+                # use RAD neighbours for NRF
+                molecule.mat_NRF[s] = (molecule.mat_NRF[s] * 
+                        molecule.flat_RAD[s][:_NC2])
+                # use RAD neighbours in force Proj matrix and e bias
+                mat_Fvals = mat_Fvals[:,] * molecule.flat_RAD[s]
+                molecule.mat_eij[s] = (molecule.mat_eij[s] * 
+                        molecule.flat_RAD[s])
+                # include RAD in the separated energy bias
+                molecule.mat_bias[s] = (molecule.mat_bias[s] * 
+                        molecule.flat_RAD[s])
+
 
             #mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2)
             mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2+extra_cols)
@@ -489,6 +626,8 @@ class Converter(object):
             if norm:
                 norm_recip_r = np.sum(molecule.mat_bias[s] ** 2) ** 0.5
                 molecule.mat_bias[s] = molecule.mat_bias[s] / norm_recip_r
+                molecule.mat_eij[s,-1] = molecule.mat_bias[s]
+                #print(molecule.mat_bias[s])
 
 
             '''
@@ -511,6 +650,9 @@ class Converter(object):
                     #posinf=0.0, neginf=0.0)
             #np.ma.masked_array(molecule.mat_bias[s], 
                     #~np.isfinite(molecule.mat_bias[s])).filled(0)
+
+
+
             mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2+extra_cols))
 
             #norm_NRF = np.sum((molecule.mat_NRF[s]) ** 2) ** 0.5
@@ -535,6 +677,7 @@ class Converter(object):
                 _NRF[_NRF == -np.inf] = 0
                 _NRF[np.isnan(_NRF)] = 0
                 molecule.mat_NRF[s] = _NRF
+
 
 
             #for e in mat_FE:
@@ -570,12 +713,31 @@ class Converter(object):
 
 
             molecule.mat_FE[s] = decomp_FE
+            #molecule.mat_FE[s] = decomp_FE * molecule.mat_bias[s] #
             '''
-            if s == 0:
-                print('mat_FE', molecule.mat_FE[s])
-                print('sum_mat_FE', np.sum(molecule.mat_FE[s]))
-                print('E', molecule.energies[s])
+            if s < 3:
+                print('\n\n', s)
+                print('mat_NRF\n', molecule.mat_NRF[s])
+                print('mat_FE\n', molecule.mat_FE[s].shape, 
+                        molecule.mat_FE[s])
+                print('mat_r\n', molecule.mat_r[s])
+                print('flat_RAD\n', molecule.flat_RAD[s])
+                print('sum_mat_FE\n', np.sum(molecule.mat_FE[s]))
+                print('E\n', molecule.energies[s][0])
+                print('F\n', molecule.forces[s])
+                recompFE = np.dot(molecule.mat_eij[s], molecule.mat_FE[s])
+                print('recompE\n', recompFE[-1])
+                print('recompF\n', recompFE[:-1].reshape((-1,3)))
+                #print('E diff\n', molecule.energies[s] - recompFE[-1])
+                #print('F diff\n', 
+                        #molecule.forces[s] - recompFE[:-1].reshape((-1,3)))
+                _N = 0
+                for i in range(n_atoms):
+                    for j in range(i):
+                        print(_N+1, i+1, j+1, molecule.flat_RAD[s][_N])
+                        _N += 1
             '''
+        #sys.exit()
 
 
     def get_simultaneous_interatomic_energies_forces2(atoms, coords, forces, 

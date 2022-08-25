@@ -44,12 +44,13 @@ start_time = time.time()
 
 
 class CoordsToNRF_test(Layer):
-    def __init__(self, atoms_flat, max_NRF, _NC2, **kwargs):
+    def __init__(self, atoms_flat, max_NRF, _NC2, n_atoms, **kwargs):
         super(CoordsToNRF_test, self).__init__()
         self.atoms_flat = atoms_flat
         #self.atoms2 = tf.Variable(atoms2)
         self.max_NRF = max_NRF
         self._NC2 = _NC2
+        self.n_atoms = n_atoms
         #self.name = name
         self.au2kcalmola = 627.5095 * 0.529177
 
@@ -75,13 +76,18 @@ class CoordsToNRF_test(Layer):
                 shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
         r = diff_flat ** 0.5
 
-        rc = 4
+
         recip_r2 = 1 / r ** 2
-        recip_r2 = tf.where(tf.math.less(recip_r2, 1 / rc ** 2), 
-                tf.zeros_like(recip_r2), recip_r2) 
+        rc = 4
+        #recip_r2 = tf.where(tf.math.less(recip_r2, 1 / rc ** 2), 
+                #tf.zeros_like(recip_r2), recip_r2) 
 
         _NRF = (((self.atoms_flat * self.au2kcalmola) * recip_r2) / 
                 self.max_NRF) #scaled
+
+        # get RAD neighbours and include these
+        flat_RAD = RAD_neighbours(self.n_atoms, self._NC2)(diff2)
+        _NRF = _NRF * flat_RAD
 
         return _NRF
 
@@ -488,7 +494,106 @@ class GetQ(Layer):
         qs = tf.transpose(qs)
         #qs = qs * recip_r #remove bias so sum q = E
 
-        return qs 
+        return qs
+
+
+class RAD_neighbours(Layer):
+    def __init__(self, n_atoms, _NC2, **kwargs):
+        super(RAD_neighbours, self).__init__()
+        #self.max_FE = tf.Variable(max_FE, name='3a')
+        self.n_atoms = n_atoms
+        self_NC2 = _NC2
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, self._NC2)
+
+    def call(self, diff2):
+
+        # get all distances between atoms
+        r_tri = diff2 ** 0.5
+        RAD = []
+        for i in range(self.n_atoms):
+            r = r_tri[:,i]
+            # sort neighbours of i by closest distance
+            indices = tf.argsort(r) #all neighbour atom ixs
+            sorted_r = tf.gather(r, indices, batch_dims=-1)
+            blocked = []
+            # set i-i neighbour to blocked
+            blocked.append(tf.zeros_like(r[:,i])) #i-i term
+            for j in range (1, self.n_atoms):
+                # for all neighbours j of i, get distance rij
+                j_indices = tf.reshape(indices[:,j], [-1,1]) #neighbour j ixs
+                rij = tf.gather(r, indices=j_indices, axis=1, batch_dims=-1)
+                rij = tf.reshape(rij, [-1])
+                # set all j'th neighbours initially as unblocked
+                blocked_j = tf.ones_like(r[:,i])
+                for k in range(1, j):
+                    # for all neighbours of j that are closer to i,
+                    # get distance rik 
+                    k_indices = tf.reshape(indices[:,k], [-1,1])
+                    rik = tf.gather(r, indices=k_indices, axis=1, 
+                            batch_dims=-1)
+                    rik = tf.reshape(rik, [-1])
+                    rjk = tf.gather(r_tri, indices=j_indices, batch_dims=-1)
+                    rjk = tf.gather(rjk, indices=k_indices, axis=1, 
+                            batch_dims=-1)
+                    rjk = tf.reshape(rjk, [-1])
+                    costheta_jik = ((rjk ** 2 - rik ** 2 - rij ** 2) /
+                            (-2 * rik * rij))
+                    # get each side of RAD eq
+                    LHS = (1 / rij) ** 2 
+                    RHS = (((1 / rik) ** 2) * costheta_jik)
+                    # set blocked neighbours to value 0 if LHS < RHS
+                    # i.e. k blocks j from i
+                    blocked_j = tf.where(tf.math.less(LHS, RHS), 
+                            tf.zeros_like(blocked_j), blocked_j)
+                # append all j'th neighbours of i
+                blocked.append(blocked_j)
+            blocked = tf.transpose(tf.stack(blocked))
+            # sort all neighbours back to atom index order
+            sorted_indices = tf.argsort(indices)
+            blocked_sorted = tf.gather(blocked, indices=sorted_indices, 
+                    batch_dims=-1)
+            RAD.append(blocked_sorted)
+        RAD = tf.transpose(tf.stack(RAD), perm=[1,0,2])
+        # ensure neighbours are symmetric
+        RAD2 = tf.transpose(tf.stack(RAD), perm=[0,2,1])
+        RAD3 = RAD + RAD2
+        # add neighbours rather than remove
+        RAD = tf.where(tf.math.greater(RAD3, 0), 
+                tf.ones_like(RAD), RAD)
+        # remove neighbours rather than add
+        #RAD = tf.where(tf.math.equal(RAD3, 1), 
+                #tf.zeros_like(RAD), RAD)
+
+
+        # find neighbours of a neighbour (nn) and make them its neighbours
+        a = tf.expand_dims(RAD, 3)
+        b = tf.expand_dims(RAD, 2)
+        nn = a * b
+        nn = tf.reduce_sum(nn, axis=1) + RAD
+        #nn = tf.reduce_sum(nn, axis=1, keepdims=True) + RAD
+        # make diag zeros to remove self neighbours
+        #a_list = np.arange(n_atoms)
+        #nn[:, a_list, a_list] = 0.
+        RAD = tf.linalg.set_diag(nn, diagonal=tf.zeros_like(nn[:,-1]))
+
+
+        #flatten r so that _NC2 values are left
+        r_tri_RAD = r_tri * RAD
+        tri = tf.linalg.band_part(r_tri, -1, 0) #lower rs
+        tri2 = tf.linalg.band_part(r_tri_RAD, -1, 0) #lower RAD
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri2, nonzero_indices)
+        r_flat_RAD = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        # replace zeros with ones
+        safe = tf.where(tf.equal(r_flat_RAD, 0.), 1., r_flat_RAD)
+        # 1/r and replace 1s with zeros
+        recip_r_flat_RAD = tf.where(r_flat_RAD < 1., 0., 1. / safe)
+        flat_RAD = tf.where(r_flat_RAD < 1., 0., 1.)
+        return flat_RAD
 
 
 class EijMatrix_test(Layer):
@@ -535,7 +640,8 @@ class EijMatrix_test(Layer):
         r_flat = diff_flat**0.5
 
 
-
+        # get RAD neighbours (0,1)
+        flat_RAD = RAD_neighbours(self.n_atoms, self._NC2)(diff2)
 
 
         #_NRF = ((self.atoms_flat * self.au2kcalmola) / (r_flat ** 2))
@@ -560,23 +666,41 @@ class EijMatrix_test(Layer):
         '''
 
 
+
+
+
+        '''
         ##adding 1 extra col
-        #'''
         ones = tf.ones_like(r_flat)
         ones = tf.reshape(ones[:,0], shape=(-1, 1))
         r_flat_test = tf.concat([r_flat, ones], 1) 
+
+        # add extra col to RAD neighbours
+        ones = tf.ones_like(flat_RAD)
+        ones = tf.reshape(ones[:,0], shape=(-1, 1))
+        flat_RAD = tf.concat([flat_RAD, ones], 1)
+
         recip_r_flat = 1 / r_flat_test
+        '''
+        recip_r_flat = 1 / r_flat
 
         #set rs greater than rc to zero
         rc = 2
-        recip_r_flat = tf.where(tf.math.less(recip_r_flat, 1/rc), 
-                tf.zeros_like(recip_r_flat), recip_r_flat) 
+        #recip_r_flat = tf.where(tf.math.less(recip_r_flat, 1/rc), 
+                #tf.zeros_like(recip_r_flat), recip_r_flat) 
 
+        # include only RAD neighboours
+        recip_r_flat = recip_r_flat * flat_RAD
+
+        # get norm values
         norm_recip_r = tf.reduce_sum(recip_r_flat ** 2, axis=1, 
                 keepdims=True) ** 0.5
         norm_recip_r_flat = recip_r_flat / norm_recip_r
 
 
+        #E = tf.einsum('bi, ib -> b', norm_recip_r_flat, 
+                #tf.transpose(decompFE_flat))
+        ## RAD
         E = tf.einsum('bi, ib -> b', norm_recip_r_flat, 
                 tf.transpose(decompFE_flat))
         E = tf.reshape(E, shape=(tf.shape(tri)[0], 1)) #need to define shape
@@ -932,7 +1056,7 @@ class Network(object):
 
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms*(n_atoms-1)/2)
-        extra_cols = 1 #0 #n_atoms ## !!!!!!!!
+        extra_cols = 0 #0 #n_atoms ## !!!!!!!!
         print('!!!!! extra_cols:', extra_cols)
         atoms = np.array([float(i) for i in molecule.atoms], dtype='float32')
         atoms_ = tf.convert_to_tensor(atoms, dtype=tf.float32)
@@ -1256,7 +1380,7 @@ class Network(object):
 
 
         #coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
-        #NRF_layer = CoordsToNRF_test(atoms_flat, max_NRF, _NC2, 
+        #NRF_layer = CoordsToNRF_test(atoms_flat, max_NRF, _NC2, n_atoms, 
                 #name='NRF_layer')(coords_layer)
         #model = NRF_layer
         
@@ -1282,7 +1406,7 @@ class Network(object):
             #if l > 0:
                 #model = concatenate([model2[3], NRF_layer])
             coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
-            NRF_layer = CoordsToNRF_test(atoms_flat, max_NRF, _NC2, 
+            NRF_layer = CoordsToNRF_test(atoms_flat, max_NRF, _NC2, n_atoms, 
                     name='NRF_layer')(coords_layer)
             #sumNRF_layer = SumNRF(_NC2, max_NRF, max_sumNRF, 
                     #name='sumNRF_layer')(NRF_layer)
