@@ -16,6 +16,6 @@ from .calculate.Binner import Binner
 from .calculate.Plotter import Plotter
 from .calculate.MM import MM
 from .write.Writer import Writer
-from .nn.Network_v2 import Network
+#from .nn.Network_v2 import Network
 #from .nn.Network import Network
 from .calculate.Conservation import Conservation

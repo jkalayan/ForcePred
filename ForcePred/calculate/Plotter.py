@@ -45,10 +45,10 @@ class Plotter(object):
         #ax.set_xlim(-180, 180)
 
         ### fix aspect ratio as square
-        x0,x1 = ax.get_xlim()
-        y0,y1 = ax.get_ylim()
-        ax.set_aspect(abs(x1-x0)/abs(y1-y0))
-        #ax.set_aspect('auto') #newer matplotlib version
+        #x0,x1 = ax.get_xlim()
+        #y0,y1 = ax.get_ylim()
+        #ax.set_aspect(abs(x1-x0)/abs(y1-y0))
+        ax.set_aspect('auto') #newer matplotlib version
 
     def colorbar(fig, ax, sc, zlabel):
         cbar = fig.colorbar(sc,
@@ -189,7 +189,8 @@ class Plotter(object):
                 )
         plt.close(plt.gcf())
 
-    def plot_2d(x_list, y_list, label_list, xlabel, ylabel, plot_name):
+    def plot_2d(x_list, y_list, label_list, xlabel, ylabel, plot_name, 
+            log=False):
         fig, ax = plt.subplots(figsize=(10, 10), 
                 edgecolor='k') #all in one plot
         lines = []
@@ -197,7 +198,8 @@ class Plotter(object):
             line = ax.plot(x, y, lw=3, label=label)
             lines.append(line)
         Plotter.format(ax, x, y, xlabel, ylabel)
-        ax.set_xscale('log')
+        if log:
+            ax.set_xscale('log')
         ax.xaxis.set_tick_params(direction='in', which='both')
         ax.yaxis.set_tick_params(direction='in', which='both')
         ax.grid(color='grey', linestyle='--', which='major', 

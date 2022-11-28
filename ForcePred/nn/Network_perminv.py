@@ -14,6 +14,8 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, \
         ReduceLROnPlateau
 from tensorflow.keras import backend as K
 import tensorflow as tf
+from tensorflow.keras.constraints import max_norm
+from tensorflow.keras import regularizers
 
 #print("TensorFlow version:", tf.__version__)
 #print("List of GPUs:", tf.config.list_physical_devices('GPU'))
@@ -60,8 +62,8 @@ class CoordsToNRF_test(Layer):
     def compute_output_shape(self, input_shape):
         batch_size = input_shape[0]
         n_atoms = input_shape[1]
-        #return (batch_size, n_atoms, n_atoms)
-        return (batch_size, self._NC2)
+        return (batch_size, n_atoms, n_atoms)
+        #return (batch_size, self._NC2)
 
     def call(self, coords):
         a = tf.expand_dims(coords, 2)
@@ -78,6 +80,7 @@ class CoordsToNRF_test(Layer):
 
 
         recip_r2 = 1 / r ** 2
+        # include r cutoff
         rc = 4
         #recip_r2 = tf.where(tf.math.less(recip_r2, 1 / rc ** 2), 
                 #tf.zeros_like(recip_r2), recip_r2) 
@@ -86,8 +89,10 @@ class CoordsToNRF_test(Layer):
                 self.max_NRF) #scaled
 
         # get RAD neighbours and include these
-        flat_RAD = RAD_neighbours(self.n_atoms, self._NC2)(diff2)
-        _NRF = _NRF * flat_RAD
+        #flat_RAD = RAD_neighbours(self.n_atoms, self._NC2)(diff2)
+        #_NRF = _NRF * flat_RAD
+        #tri_NRF = Triangle(self.n_atoms)(_NRF)
+        #tri_NRF = tf.linalg.set_diag(tri_NRF, tf.zeros(tri_NRF.shape[0:-1]))
 
         return _NRF
 
@@ -455,6 +460,7 @@ class GetQ(Layer):
         r = Triangle(self.n_atoms)(r_flat)
         r2 = tf.expand_dims(r, 3)
         eij_F2 = diff / r2
+        ## is_nan IS NOT DIFFERENTIABLE!
         eij_F = tf.where(tf.math.is_nan(eij_F2), tf.zeros_like(eij_F2), 
                 eij_F2) #remove nans 
 
@@ -567,7 +573,7 @@ class RAD_neighbours(Layer):
         #RAD = tf.where(tf.math.equal(RAD3, 1), 
                 #tf.zeros_like(RAD), RAD)
 
-
+        '''
         # find neighbours of a neighbour (nn) and make them its neighbours
         a = tf.expand_dims(RAD, 3)
         b = tf.expand_dims(RAD, 2)
@@ -578,7 +584,7 @@ class RAD_neighbours(Layer):
         #a_list = np.arange(n_atoms)
         #nn[:, a_list, a_list] = 0.
         RAD = tf.linalg.set_diag(nn, diagonal=tf.zeros_like(nn[:,-1]))
-
+        '''
 
         #flatten r so that _NC2 values are left
         r_tri_RAD = r_tri * RAD
@@ -641,7 +647,7 @@ class EijMatrix_test(Layer):
 
 
         # get RAD neighbours (0,1)
-        flat_RAD = RAD_neighbours(self.n_atoms, self._NC2)(diff2)
+        #flat_RAD = RAD_neighbours(self.n_atoms, self._NC2)(diff2)
 
 
         #_NRF = ((self.atoms_flat * self.au2kcalmola) / (r_flat ** 2))
@@ -670,19 +676,33 @@ class EijMatrix_test(Layer):
 
 
         '''
-        ##adding 1 extra col
-        ones = tf.ones_like(r_flat)
-        ones = tf.reshape(ones[:,0], shape=(-1, 1))
-        r_flat_test = tf.concat([r_flat, ones], 1) 
+        ## adding 1 extra col
+        #ones = tf.ones_like(r_flat)
+        #ones = tf.reshape(ones[:,0], shape=(-1, 1))
+        #r_flat_test = tf.concat([r_flat, ones], 1) 
+
+        ## adding N extra cols
+        r_tri = Triangle(self.n_atoms)(r_flat)
+        sumrs = tf.reduce_sum(r_tri, 1) / self.n_atoms
+        r_flat_test = tf.concat([r_flat, sumrs], 1) 
 
         # add extra col to RAD neighbours
-        ones = tf.ones_like(flat_RAD)
-        ones = tf.reshape(ones[:,0], shape=(-1, 1))
-        flat_RAD = tf.concat([flat_RAD, ones], 1)
+        #ones = tf.ones_like(flat_RAD)
+        #ones = tf.reshape(ones[:,0], shape=(-1, 1))
+        #flat_RAD = tf.concat([flat_RAD, ones], 1)
 
         recip_r_flat = 1 / r_flat_test
         '''
-        recip_r_flat = 1 / r_flat
+
+
+        recip_r_flat = 1 / r_flat 
+        #recip_r_flat = 1 / r_flat ** 2
+        #recip_r_flat = _NRF
+            
+        ## when qs are biased already (forces are biased) !!!!!!
+        #recip_r_flat = 1 / r_flat ** 2
+        #decompFE_flat = decompFE_flat / recip_r_flat
+
 
         #set rs greater than rc to zero
         rc = 2
@@ -690,7 +710,7 @@ class EijMatrix_test(Layer):
                 #tf.zeros_like(recip_r_flat), recip_r_flat) 
 
         # include only RAD neighboours
-        recip_r_flat = recip_r_flat * flat_RAD
+        #recip_r_flat = recip_r_flat * flat_RAD
 
         # get norm values
         norm_recip_r = tf.reduce_sum(recip_r_flat ** 2, axis=1, 
@@ -700,7 +720,6 @@ class EijMatrix_test(Layer):
 
         #E = tf.einsum('bi, ib -> b', norm_recip_r_flat, 
                 #tf.transpose(decompFE_flat))
-        ## RAD
         E = tf.einsum('bi, ib -> b', norm_recip_r_flat, 
                 tf.transpose(decompFE_flat))
         E = tf.reshape(E, shape=(tf.shape(tri)[0], 1)) #need to define shape
@@ -846,6 +865,12 @@ class EijMatrix_test2(Layer):
         diff_flat = tf.reshape(nonzero_values, 
                 shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
         r_flat = diff_flat**0.5
+
+
+        ## when qs are biased already (forces are biased) !!!!!!
+        #recip_r_flat = 1 / r_flat ** 2
+        #decompFE_flat = decompFE_flat / recip_r_flat
+        #decompFE = Triangle(self.n_atoms)(decompFE_flat)
         
         '''
         #get energy 1/r_ij eij matrix
@@ -875,6 +900,91 @@ class EijMatrix_test2(Layer):
 
         return F
 
+
+class eij_E_direction(Layer):
+    def __init__(self, n_atoms, _NC2, **kwargs):
+        super(eij_E_direction, self).__init__()
+        #self.max_FE = tf.Variable(max_FE, name='4a')
+        self.n_atoms = n_atoms
+        self._NC2 = _NC2
+        #self.prescale = tf.Variable(prescale, name='4b')
+        #self.name = name
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, 1)
+
+    def call(self, coords_decompFE):
+        '''Get (b,3,NC2) eij matrix to recompose qs to 3E.'''
+        coords, decompFE_flat = coords_decompFE
+
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        diff2 = tf.reduce_sum(diff**2, axis=-1) # get sqrd diff
+        # flatten diff2 so that _NC2 values are left
+        tri = tf.linalg.band_part(diff2, -1, 0) #lower
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        diff_flat = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) # reshape to _NC2
+        r_flat = diff_flat**0.5
+
+        # get eij Projection matrix as used for force recomp
+        r = Triangle(self.n_atoms)(r_flat)
+        r2 = tf.expand_dims(r, 3)
+        # replace zeros with ones
+        safe = tf.where(tf.equal(r2, 0.), 1., r2)
+        eij_ = diff / safe
+
+        # now reduce the eij Proj matrix so squished (b,3,b,NC2) directions
+        eij_xyz = []
+        for x in range(3):
+            # flatten so that _NC2 values are left
+            tri = tf.linalg.band_part(eij_[:,:,:,x], -1, 0) # lower
+            nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+            nonzero_values = tf.gather_nd(tri, nonzero_indices)
+            x_flat = tf.reshape(nonzero_values, 
+                    shape=(tf.shape(tri)[0], -1)) # reshape to _NC2
+            eij_xyz.append(x_flat)
+        eij_xyz_ = tf.transpose(tf.stack(eij_xyz), perm=[1,0,2]) 
+        # shape is (b,3,NC2)
+
+        _E3 = tf.einsum('bij, bj -> bi', eij_xyz_, decompFE_flat)
+        _E = tf.reduce_sum(_E3, 1, keepdims=True)
+
+        return _E
+
+
+
+class Flatten_qs(Layer):
+    def __init__(self, n_atoms, _NC2, **kwargs):
+        super(Flatten_qs, self).__init__()
+        self.n_atoms = n_atoms
+        self._NC2 = _NC2
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, self._NC2)
+        #return (batch_size, self.n_atoms, self.n_atoms)
+
+    def call(self, tri_qs):
+        '''Get averaged flattened qs'''
+        #tri_qs = tf.reshape(tri_qs, [-1, self.n_atoms, self.n_atoms])
+
+        tri_qs2 = (tf.transpose(tri_qs, perm=[0,2,1]) + tri_qs) / 2
+
+        ones = tf.ones_like(tri_qs2)
+        mask_a = tf.linalg.band_part(ones, 0, -1) # Upper triangular matrix of 0s and 1s
+        mask_b = tf.linalg.band_part(ones, 0, 0)  # Diagonal matrix of 0s and 1s
+        mask = tf.cast(mask_a - mask_b, dtype=tf.bool) # Make a bool mask
+
+        nonzero_indices = tf.where(tf.not_equal(
+                mask, tf.zeros_like(mask)))
+        nonzero_values = tf.gather_nd(tri_qs2, nonzero_indices)
+        qs_flat = tf.reshape(nonzero_values, [-1, self._NC2]) 
+
+        return qs_flat
 
 
 @tf.function
@@ -923,6 +1033,27 @@ class EnergyGradient(Layer):
                 #) #* -1
         #return gradients
 
+
+class ForceDiff(Layer):
+    def __init__(self, **kwargs):
+        super(ForceDiff, self).__init__()
+        #self.n_atoms = n_atoms
+        #self._NC2 = _NC2
+        #self.g = g
+        #self.name = name
+
+    #def build(self, input_shape):
+        #self.kernal = self.add_weight('kernel')
+
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, self.n_atoms, 3)
+        #return (batch_size, self._NC2)
+
+    def call(self, recompF_gradient):
+        recompF, gradient = recompF_gradient
+        diff = recompF - gradient
+        return diff
 
 
 
@@ -1056,7 +1187,7 @@ class Network(object):
 
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms*(n_atoms-1)/2)
-        extra_cols = 0 #0 #n_atoms ## !!!!!!!!
+        extra_cols = 0 #n_atoms #1 ## !!!!!!!!
         print('!!!!! extra_cols:', extra_cols)
         atoms = np.array([float(i) for i in molecule.atoms], dtype='float32')
         atoms_ = tf.convert_to_tensor(atoms, dtype=tf.float32)
@@ -1082,7 +1213,7 @@ class Network(object):
 
         if training_model == False:
             #for loading a model to use with openmm
-            get_data = True #False #
+            get_data = False #True #
             load_first = False
             fit = False
             load_weights = True
@@ -1329,10 +1460,14 @@ class Network(object):
                     train2, axis=0)
             val_output_E_postscale = np.take(train_output_E_postscale, 
                     val, axis=0)
+            print('train max F: {}, min F {}'.format(
+                np.max(train_forces), np.min(train_forces)))
             train2_forces = np.take(train_forces, train2, axis=0)
             print('train2 max F: {}, min F {}'.format(
                 np.max(train2_forces), np.min(train2_forces)))
             val_forces = np.take(train_forces, val, axis=0)
+            print('val max F: {}, min F {}'.format(
+                np.max(val_forces), np.min(val_forces)))
             train2_output_matFE = np.take(train_output_matFE, train2, axis=0)
             val_output_matFE = np.take(train_output_matFE, val, axis=0)
             #train2_output_atomFE = np.take(train_output_atomFE, train2, 
@@ -1344,6 +1479,13 @@ class Network(object):
             train2_input_NRF = np.take(train_input_NRF, train2, axis=0)
             val_input_NRF = np.take(train_input_NRF, val, axis=0)
 
+            # zeros in shape of foorces
+            train_zeros_F = np.zeros_like(train_forces)
+            train2_zeros_F = np.zeros_like(train2_forces)
+            val_zeros_F = np.zeros_like(val_forces)
+            test_zeros_F = np.zeros_like(test_forces)
+            zeros_F = np.zeros_like(output_F)
+
 
         if get_data == False: #hardcoded
             #prescale1 = [-167314.95257129727, -167288.0645391319, 
@@ -1351,12 +1493,12 @@ class Network(object):
             #prescale1 = [-167315.01917961572, -167288.834575252, 
                     #-260.631337453833, 284.98286516421035]
 
-            prescale1 = [ -97086.67448670573, -97060.43620928681, 
-                    -151.45141221653606, 162.38544000536768]
+            prescale1 = [-167315.01917961572, -167288.834575252, 
+                    -260.631337453833, 284.98286516421035]
             #max_NRF1 = 12304.734510536122
-            max_NRF1 = 9119.964965436488 #13010.961100355082 
+            max_NRF1 = 13010.961100355082 #9119.964965436488 
             #max_FE1 = 211.23633766510105
-            max_FE1 = 162.3854400053677 #284.98286516421035
+            max_FE1 = 214.86748872253952 #162.3854400053677 #284.98286516421035
             print('\n!!!!scaled values over-written')
             print('prescale', prescale1)
             print('max_NRF', max_NRF1)
@@ -1370,12 +1512,16 @@ class Network(object):
         file_name='best_model'
         monitor_loss='loss'
         set_patience=1000
+        restore_best_weights = True
         print('monitor_loss:', monitor_loss)
         print('set_patience', set_patience)
+        print('restore_best_weights', restore_best_weights)
+
         mc = ModelCheckpoint(file_name, monitor=monitor_loss, mode='min', 
                 save_best_only=True, save_weights_only=True
                 )
-        es = EarlyStopping(monitor=monitor_loss, patience=set_patience)
+        es = EarlyStopping(monitor=monitor_loss, patience=set_patience, 
+                restore_best_weights=restore_best_weights)
 
 
 
@@ -1387,22 +1533,26 @@ class Network(object):
         max_depth = 1
         print('max_depth', max_depth)
         e_loss = [0, 0, 1, 1, 1, 1, 1, 1] #1
-        e2_loss = [1, 0, 1, 1, 1, 1, 1, 1] #1
+        e2_loss = [1, 0, 1, 1, 1, 1, 1, 1] #1 ***
         f_loss = [0, 0, 0, 0, 0, 0, 0, 0] #0
-        grad_loss = [1000, 0, 10, 1000, 1000, 1000, 1000, 1000] #1000
+        grad_loss = [1000, 0, 10, 1000, 1000, 1000, 1000, 1000] #1000 ***
         q_loss = [0, n_atoms, 1, 10, 1, 1, 1, 1, 1] #_NC2 
         scaleq_loss = [1, 1, 10, 1, 1, 1, 1, 1] #_NC2, this one is used!
+        force_diff_loss = [0, 0, 0, 0, 0, 0, 0, 0] #0
         best_error_all = 1e20
         best_iteration = 0
         best_model = None
+        batch_size = 32
+        print('batch_size:', batch_size)
         for l in range(0, max_depth):
             print('l', l)
             l2 = str(l)
             print('E loss weight: {} \nrecompF loss weight: {} '\
                     '\n* dE_dx loss weight: {} \nq loss weight: {} '\
-                    '\n* scaleq loss weight: {} \n* E2 loss weight: {}'.format(
+                    '\n* scaleq loss weight: {} \n* E2 loss weight: {}'\
+                    '\nforce diff loss weight: {}'.format(
                     e_loss[l], f_loss[l], grad_loss[l], q_loss[l], 
-                    scaleq_loss[l], e2_loss[l]))
+                    scaleq_loss[l], e2_loss[l], force_diff_loss[l]))
             #if l > 0:
                 #model = concatenate([model2[3], NRF_layer])
             coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
@@ -1441,21 +1591,64 @@ class Network(object):
             #dE_dx = EnergyGradient(n_atoms, _NC2, 
                     #name='dE_dx')([sum_atomEx, coords_layer])
 
-            #net_layer = Dense(units=_NC2, activation='swish', 
-                    #name='net_layer')(NRF_layer)
-            #net_layer1 = Dense(units=500, activation='swish', 
-                    #name='net_layer1')(NRF_layer)
-            net_layer2 = Dense(units=1000, activation='sigmoid', #'swish', #
-                    name='net_layer2')(NRF_layer)
+            net_layer = Dense(units=1000, activation='silu', #'swish', 
+                    #kernel_constraint=max_norm(3.),
+                    #kernel_regularizer=regularizers.L2(0.01),
+                    name='net_layer')(NRF_layer)
 
-            #'''
-            net_layer3 = Dense(
+            '''
+            net_layer = Dense(units=768, activation='silu', #'swish', 
+                    #kernel_constraint=max_norm(3.),
+                    #kernel_regularizer=regularizers.L2(0.01),
+                    name='net_layer')(NRF_layer)
+            net_layer1 = Dense(units=128, activation='silu',
+                    #'swish', #'sigmoid', #
+                    #kernel_constraint=max_norm(3.),
+                    #kernel_regularizer=regularizers.L2(0.01),
+                    name='net_layer1')(net_layer)
+            net_layer2 = Dense(units=128, activation='silu', 
+                    #'sigmoid', #'swish', #'relu', #
+                    #kernel_constraint=max_norm(3.),
+                    #kernel_regularizer=regularizers.L2(0.01),
+                    name='net_layer2')(net_layer1)
+            net_layer3 = Dense(units=64, activation='silu', 
+                    #'sigmoid', #'swish', #'relu', #
+                    #kernel_constraint=max_norm(3.),
+                    #kernel_regularizer=regularizers.L2(0.01),
+                    name='net_layer3')(net_layer2)
+            '''
+
+            '''
+            split_NRF = tf.split(NRF_layer, 
+                    num_or_size_splits=n_atoms, axis=1)
+            net_layers = []
+            for x in range(n_atoms):
+                net_layerA = Dense(units=128, activation='silu', 
+                        name='net_layerA_{}'.format(x))(split_NRF[x])
+                net_layerB = Dense(units=128, activation='silu', 
+                        name='net_layerB_{}'.format(x))(net_layerA)
+                net_layerC = Dense(units=64, activation='silu', 
+                        name='net_layerC_{}'.format(x))(net_layerB)
+                net_layerD = Dense(units=n_atoms, activation='silu', 
+                        name='net_layerD_{}'.format(x))(net_layerC)
+                net_layers.append(net_layerD)
+            net_layer2 = concatenate(net_layers, axis=1, name='net_layer2')
+            #layer needed for getting _NC2 qs for use in next sigmoid layer
+            flat_qs = Flatten_qs(n_atoms, _NC2, name='flat_qs')(net_layer2)
+            '''
+
+            #net_layer3 = Dense(units=64, activation='silu', 
+                    #name='net_layer3')(flat_qs)
+
+            net_layer4 = Dense(
                     units=_NC2+extra_cols, 
                     activation='sigmoid',#'linear', #
-                    name='net_layer3')(net_layer2)
+                    #kernel_constraint=max_norm(3.),
+                    #kernel_regularizer=regularizers.L2(0.01),
+                    name='net_layer4')(net_layer)#(flat_qs)
             scale_layer = ScaleFE(
                     _NC2+extra_cols, 
-                    max_FE, name='scale_layer')(net_layer3)
+                    max_FE, name='scale_layer')(net_layer4)
             #E_layer = Dense(units=1, activation='sigmoid', 
                     #name='E_layer')(net_layer3)
             #sumNet_layer = SumNet(max_FE, name='sumNet_layer')(net_layer3)
@@ -1464,9 +1657,11 @@ class Network(object):
             eij_layer = EijMatrix_test(n_atoms, _NC2, prescale, atoms_flat, 
                     #name='eij_layer')([coords_layer, net_layer3])
                     name='eij_layer')([coords_layer, scale_layer])
+            #eij_layer = eij_E_direction(n_atoms, _NC2,
+                    #name='eij_layer')([coords_layer, scale_layer])
+
             scaleE_layer2 = ScaleE2(prescale, name='scaleE_layer2')(
                     eij_layer)
-            #'''
 
 
             '''
@@ -1482,18 +1677,18 @@ class Network(object):
             '''
 
 
-            
             #e_qm_layer = GetEqm(atoms_flat, _NC2, name='e_qm_layer')(
                     #[scaleE_layer2, coords_layer])
-            #eij_layer2 = EijMatrix_test2(n_atoms, _NC2, 
-                    ##name='eij_layer2')([coords_layer, net_layer3])
-                    #name='eij_layer2')([coords_layer, scale_layer])
+            eij_layer2 = EijMatrix_test2(n_atoms, _NC2, 
+                    #name='eij_layer2')([coords_layer, net_layer3])
+                    name='eij_layer2')([coords_layer, scale_layer])
             dE_dx = EnergyGradient(n_atoms, _NC2, 
                     name='dE_dx')([scaleE_layer2, coords_layer])
                     #name='dE_dx')([e_qm_layer, coords_layer])
             #qpairs = GetQ(n_atoms, _NC2, atoms_flat, name='qpairs')(
                     #[coords_layer, dE_dx, eij_layer])
                     ##dE_dx, sumNet_layer])
+            force_diff = ForceDiff(name='force_diff')([eij_layer2, dE_dx]) 
 
 
 
@@ -1540,9 +1735,11 @@ class Network(object):
             '''
 
 
-            rlrop = ReduceLROnPlateau(monitor='loss', factor=0.5, 
-                    patience=1000, min_lr=0.001)
-            optimizer = keras.optimizers.Adam(lr=0.001,
+            rlrop = ReduceLROnPlateau(monitor=monitor_loss, factor=0.5, 
+                    patience=300, min_lr=1e-4)
+            print('rlrop: monitor={}, factor=0.5, patience=300, '\
+                    'min_lr=1e-4'.format(monitor_loss))
+            optimizer = keras.optimizers.Adam(lr=0.001, #0.001,
                     beta_1=0.9, beta_2=0.999, epsilon=1e-7, amsgrad=False)
 
 
@@ -1550,19 +1747,20 @@ class Network(object):
                     inputs=[coords_layer], 
                     ##inputs=[NRF_layer], 
                     outputs=[
-                        ##coords_layer,
-                        ##forces_layer, 
+                        #coords_layer,
+                        #forces_layer, 
                         dE_dx, 
                         scale_layer,
-                        ##net_layer3,
-                        ##qpairs,
-                        ##scale_atomEx, 
-                        ##sum_atomEx, 
+                        #net_layer3,
+                        #qpairs,
+                        #scale_atomEx, 
+                        #sum_atomEx, 
                         scaleE_layer2,
-                        ##e_qm_layer,
-                        ##net_layer2,
+                        #e_qm_layer,
+                        #net_layer2,
                         #eij_layer, 
-                        ##eij_layer2
+                        eij_layer2,
+                        force_diff,
                         ], 
                     )
 
@@ -1602,7 +1800,7 @@ class Network(object):
                             #tf.constant(train2_forces, dtype=tf.float32),
                             #),
                             'energy_gradient': 'mse',
-                            #'eij_matrix_test2': 'mse',
+                            'eij_matrix_test2': 'mse',
                             #'scale_atom_e': 'mse',
                             #'sum_atom_e': 'mse',
                             #'eij_matrix_test': 'mse', #*
@@ -1612,6 +1810,7 @@ class Network(object):
                             'scale_e2': 'mse',
                             #'get_eqm': 'mse',
                             #'get_q': 'mse',
+                            'force_diff': 'mse',
                             },
                         loss_weights={
                             #'for_forces': 0, #grad_loss - q_loss[l],
@@ -1619,16 +1818,17 @@ class Network(object):
                             #'eij_matrix_test': e_loss[l], #*
                             'scale_e2': e2_loss[l],
                             #'get_eqm': e2_loss[l],
-                            #'eij_matrix_test2': f_loss[l],
+                            'eij_matrix_test2': f_loss[l],
                             #'scale_atom_e': q_loss[l],
                             'scale_fe': scaleq_loss[l], #*
                             #'net_layer3': scaleq_loss[l],
                             #'get_q': q_loss[l],
                             #'sum_atom_e': e_loss[l],
                             #'coords_layer': 0
+                            'force_diff': force_diff_loss[l],
                             },
-                        optimizer='adam',
-                        #optimizer=optimizer,
+                        #optimizer='adam',
+                        optimizer=optimizer,
                         )
             if l != 0:
                 model.compile(
@@ -1662,6 +1862,7 @@ class Network(object):
                         optimizer='adam')
 
             model.summary()
+            print(model(train2_input_coords[0:2]))
 
             print('initial learning rate:', K.eval(model.optimizer.lr))
 
@@ -1680,14 +1881,15 @@ class Network(object):
 
             #fit = True
             if fit:
-                model.fit(train2_input_coords, 
+                result = model.fit(train2_input_coords, 
                         [
                             train2_forces, 
                             #train2_output_matFE, 
                             train2_output_matFE, 
                             train2_output_E_postscale, 
                             #train2_output_E, 
-                            #train2_forces, 
+                            train2_forces,
+                            train2_zeros_F,
                             ],
                         validation_data=(val_input_coords, 
                             [
@@ -1696,14 +1898,17 @@ class Network(object):
                                 val_output_matFE, 
                                 val_output_E_postscale, 
                                 #val_output_E, 
-                                #val_forces, 
+                                val_forces,
+                                val_zeros_F,
                                 ]),
                         epochs=1000000, 
                         verbose=2,
+                        batch_size=batch_size,
                         #callbacks=[mc],
-                        callbacks=[es,mc],
-                        #callbacks=[es,mc,rlrop],
+                        #callbacks=[es,mc],
+                        callbacks=[es,mc,rlrop],
                         )
+
 
                 best_error = model.evaluate(train2_input_coords, 
                         [
@@ -1712,7 +1917,8 @@ class Network(object):
                             train2_output_matFE, 
                             train2_output_E_postscale, 
                             #train2_output_E, 
-                            #train2_forces, 
+                            train2_forces, 
+                            train2_zeros_F,
                             ],
                         verbose=0)
                 print(l, 'model error train2: ', best_error)
@@ -1724,7 +1930,8 @@ class Network(object):
                             val_output_matFE, 
                             val_output_E_postscale, 
                             #val_output_E, 
-                            #val_forces, 
+                            val_forces, 
+                            val_zeros_F,
                             ],
                         verbose=0)
                 print(l, 'model error val: ', best_error2)
@@ -1736,7 +1943,8 @@ class Network(object):
                             train_output_matFE, 
                             train_output_E_postscale, 
                             #train_output_E, 
-                            #train_forces, 
+                            train_forces, 
+                            train_zeros_F,
                             ],
                         verbose=0)
                 print(l, 'model error train: ', best_error3)
@@ -1748,7 +1956,8 @@ class Network(object):
                             test_output_matFE, 
                             test_output_E_postscale, 
                             #test_output_E, 
-                            #test_forces, 
+                            test_forces,
+                            test_zeros_F,
                             ],
                         verbose=0)
                 print(l, 'model error test: ', best_error4)
@@ -1760,7 +1969,8 @@ class Network(object):
                             output_matFE, 
                             output_E_postscale, 
                             #output_E, 
-                            #output_F, 
+                            output_F,
+                            zeros_F,
                             ],
                         verbose=0)
                 print(l, 'model error all: ', best_error5)
@@ -1801,7 +2011,8 @@ class Network(object):
 
         #load_weights = False
         if load_weights:
-            model_file='best_model1'#'../model/best_ever_model_6'
+            #model_file='best_model1'#'../model/best_ever_model_6'
+            model_file='best_ever_model_0'#'../model/best_ever_model_6'
             #model_file='best_model'#'../model/best_ever_model_6'
             print('load_weights', load_weights, model_file)
             model.load_weights(model_file)
@@ -1815,7 +2026,8 @@ class Network(object):
                         train_output_matFE,
                         train_output_E_postscale,
                         #train_output_E,
-                        #train_forces, 
+                        train_forces, 
+                        train_zeros_F,
                         ], verbose=0)
             print(l, len(train_input_coords), 'train model error: ', 
                     best_error)
@@ -1865,8 +2077,9 @@ class Network(object):
                 #with tf.GradientTape(watch_accessed_variables=False) as tape2:
                 with tf.GradientTape() as tape2:
                     tape2.watch(x1)
-                    y = model(x1)[0]
-                gradient1 = tape2.gradient(y, x1) * -1
+                    y = model(x1) #[0]
+                print('y\n', y[2])
+                gradient1 = tape2.gradient(y[2], x1) * -1
                 print('tape_grad\n', gradient1)
                 #sess = tf.compat.v1.Session()
                 #print(sess.run(gradient1))
@@ -1964,7 +2177,15 @@ class Network(object):
         #inp_out_pred = True
         if inp_out_pred:
 
-            print('Predict all data')
+            print('\nShow layer weights')
+            lay = 0
+            for layer in model.layers:
+                weights = layer.get_weights()
+                print(layer.name, model.layers[lay].weights)
+                lay += 1
+                print()
+
+            print('\nPredict all data')
             prediction = model.predict(input_coords)
             #prediction_E = prediction[1].flatten()
             prediction_E = prediction[2].flatten()
@@ -2029,6 +2250,7 @@ class Network(object):
             test_prediction_E = test_prediction[2].flatten()
             #test_prediction_E = test_prediction[1].flatten()
             test_prediction_F = test_prediction[0]
+            test_prediction_matFE = test_prediction[1]
 
             mae, rms, msd = Binner.get_error(test_output_E_postscale.flatten(), 
                     test_prediction_E.flatten())
@@ -2040,6 +2262,12 @@ class Network(object):
                     test_prediction_F.flatten())
             print('\n{} grad F Test MAE: {} \nTest RMS: {} '\
                     '\nTest MSD: {}'.format(len(test_output_F), mae, rms, msd))
+
+            mae, rms, msd = Binner.get_error(test_output_matFE.flatten(), 
+                    test_prediction_matFE.flatten())
+            print('\n{} mat_(F)E Test MAE: {} \nTest RMS: {} '\
+                    '\nTest MSD: {}'.format(
+                    len(test_output_matFE), mae, rms, msd))
 
 
 
@@ -2102,6 +2330,17 @@ class Network(object):
 
             sys.stdout.flush()
             #sys.exit()
+
+            model_loss = result.history['loss']
+            model_val_loss = result.history['val_loss']
+            Writer.write_csv([model_loss, model_val_loss], 
+                    'loss', 'loss,val_loss')
+            Plotter.plot_2d([list(range(len(model_loss))), 
+                        list(range(len(model_val_loss)))], 
+                    [model_loss, model_val_loss], 
+                    ['loss', 'val_loss'], 
+                    'Epoch', 'Loss', 
+                    'loss_curves.png')
 
 
 

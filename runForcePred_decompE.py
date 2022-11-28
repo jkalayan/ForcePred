@@ -28,12 +28,13 @@ from ForcePred import Molecule, OPTParser, NPParser, Converter, \
 
 #from ForcePred.nn.Network_v2 import Network
 #from ForcePred.nn.Network_atomwise import Network
-from ForcePred.nn.Network_perminv import Network
+#from ForcePred.nn.Network_perminv import Network
+from ForcePred.nn.Network_double_decomp import Network
 from keras.models import Model, load_model    
 from keras import backend as K                                              
 import sys
 import tensorflow as tf
-#tf.compat.v1.disable_eager_execution()
+tf.compat.v1.disable_eager_execution()
 
 #import numpy as np
 #from itertools import islice
@@ -168,7 +169,7 @@ def run_force_pred(input_files='input_files',
     '''
     ##shorten num molecules here:
     end = len(molecule.coords)
-    step = 500
+    step = 10
     molecule.coords = molecule.coords[0:end:step]
     molecule.forces = molecule.forces[0:end:step]
     molecule.energies = molecule.energies[0:end:step]
@@ -382,7 +383,7 @@ def run_force_pred(input_files='input_files',
 
 
 
-    split = 2 #100 #500 #200 #2
+    split = 100 #9 #100 #500 #200 #2
     train = round(len(molecule.coords) / split, 3)
     print('\nget train and test sets, '\
             'training set is {} points'.format(train))
@@ -398,15 +399,16 @@ def run_force_pred(input_files='input_files',
     #sys.exit()
     '''
 
-    '''
+    #'''
     print('!!!use regularly spaced training')
+    #molecule.train = np.arange(0, len(molecule.coords), split).tolist() 
     molecule.train = np.arange(2, len(molecule.coords), split).tolist() 
             #includes the structure with highest force magnitude for malonaldehyde
     molecule.test = [x for x in range(0, len(molecule.coords)) 
             if x not in molecule.train]
     print(len(molecule.train))
     print(len(molecule.test))
-    '''
+    #'''
 
 
     '''
@@ -605,7 +607,7 @@ def run_force_pred(input_files='input_files',
         #sys.exit()
 
     get_decompE = False
-    bias_type = '1/r' # 'NRF' # 'qq/r2' #'r' #
+    bias_type = 'r' #'1/r' # 'NRF' # 'qq/r2' #
     print('\nenergy bias type: {}'.format(bias_type))
     if get_decompE:
         print('\nget mat_E')
@@ -904,7 +906,7 @@ def run_force_pred(input_files='input_files',
 
 
 
-        print('tensorflow2')
+        print('\ntensorflow2')
         sess = tf.compat.v1.Session()
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms*(n_atoms-1)/2)
@@ -930,395 +932,17 @@ def run_force_pred(input_files='input_files',
         FE = tf.concat([F_reshaped, E], axis=1)
         #print('FE', FE.shape)
 
-        coords_F_E = coords, F, E
 
-        coords, F, E  = coords_F_E
-        F_reshaped = tf.reshape(F, shape=(tf.shape(F)[0], -1))
-        FE = tf.concat([F_reshaped, E], axis=1)
+        #''' 
+        print('ave qs')
+        tf_NRF = molecule.mat_NRF[strt:end].reshape(end-strt, -1)
+        tf_NRF = tf.convert_to_tensor(tf_NRF, np.float32)
+        tri_NRF = Triangle(tf_NRF)
+        print('tri_NRF', tri_NRF.shape)
+        print(sess.run(tri_NRF))
 
-
-        a = tf.expand_dims(coords, 2)
-        b = tf.expand_dims(coords, 1)
-        diff = a - b
-        print('diff', diff.shape)
-        diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
-        print('diff2', diff2.shape)
-        #flatten diff2 so that _NC2 values are left
-        tri = tf.linalg.band_part(diff2, -1, 0) #lower
-        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
-        nonzero_values = tf.gather_nd(tri, nonzero_indices)
-        diff_flat = tf.reshape(nonzero_values, 
-                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
-        print('diff_flat', diff_flat.shape)
-        r_flat = diff_flat**0.5
-        print('r_flat', r_flat.shape)
-        print(sess.run(r_flat))
-
-
-
-        ### for RAD matrix - if RAD neighbours 1, else 0
-
-        # get all distances between atoms
-        r_tri = diff2 ** 0.5
-        print('r_tri', r_tri.shape)
-        print(sess.run(r_tri))
-        print()
-        #RAD = tf.ones_like(r_tri)
-        RAD = []
-        for i in range(n_atoms):
-            #print('i', i)
-            r = r_tri[:,i]
-            # sort neighbours of i by closest distance
-            indices = tf.argsort(r) #all neighbour atom ixs
-            sorted_r = tf.gather(r, indices, batch_dims=-1)
-            #print('r\n', r.shape, sess.run(r))
-            #print('sorted_r\n', sess.run(sorted_r))
-            #print('indices\n', sess.run(indices))
-            blocked = []
-            # set i-i neighbour to blocked
-            blocked.append(tf.zeros_like(r[:,i])) #i-i term
-            for j in range (1, n_atoms):
-                # for all neighbours j of i, get distance rij
-                j_indices = tf.reshape(indices[:,j], [-1,1]) #neighbour j ixs
-                rij = tf.gather(r, indices=j_indices, axis=1, batch_dims=-1)
-                rij = tf.reshape(rij, [-1])
-                # set all j'th neighbours initially as unblocked
-                blocked_j = tf.ones_like(r[:,i])
-                for k in range(1, j):
-                    # for all neighbours of j that are closer to i,
-                    # get distance rik 
-                    k_indices = tf.reshape(indices[:,k], [-1,1])
-                    rik = tf.gather(r, indices=k_indices, axis=1, 
-                            batch_dims=-1)
-                    rik = tf.reshape(rik, [-1])
-                    rjk = tf.gather(r_tri, indices=j_indices, batch_dims=-1)
-                    rjk = tf.gather(rjk, indices=k_indices, axis=1, 
-                            batch_dims=-1)
-                    rjk = tf.reshape(rjk, [-1])
-                    costheta_jik = ((rjk ** 2 - rik ** 2 - rij ** 2) /
-                            (-2 * rik * rij))
-                    # get each side of RAD eq
-                    LHS = (1 / rij) ** 2 
-                    RHS = (((1 / rik) ** 2) * costheta_jik)
-                    # set blocked neighbours to value 0 if LHS < RHS
-                    # i.e. k blocks j from i
-                    blocked_j = tf.where(tf.math.less(LHS, RHS), 
-                            tf.zeros_like(blocked_j), blocked_j)
-                # append all j'th neighbours of i
-                blocked.append(blocked_j)
-            blocked = tf.transpose(tf.stack(blocked))
-            #print(i, 'blocked distance sorted\n', sess.run(blocked))
-            # sort all neighbours back to atom index order
-            sorted_indices = tf.argsort(indices)
-            blocked_sorted = tf.gather(blocked, indices=sorted_indices, 
-                    batch_dims=-1)
-            #print(i, 'blocked atom ix sorted\n', sess.run(blocked_sorted))
-            RAD.append(blocked_sorted)
-            #RAD = tf.mul(RAD, [:,j,blocked_sorted])
-            #print('RAD j', sess.run(RAD[:,j]))
-            #print()
-        RAD = tf.transpose(tf.stack(RAD), perm=[1,0,2])
-        # ensure neighbours are symmetric
-        RAD2 = tf.transpose(tf.stack(RAD), perm=[0,2,1])
-        RAD3 = RAD + RAD2
-        # add neighbours rather than remove
-        RAD = tf.where(tf.math.greater(RAD3, 0), 
-                tf.ones_like(RAD), RAD)
-        # remove neighbours rather than add
-        #RAD = tf.where(tf.math.equal(RAD3, 1), 
-                #tf.zeros_like(RAD), RAD)
-        print('RAD\n', RAD.shape)
-        print(sess.run(RAD))
-
-
-
-        # find neighbours of a neighbour (nn) and make them its neighbours
-        a = tf.expand_dims(RAD, 3)
-        b = tf.expand_dims(RAD, 2)
-        nn = a * b
-        nn = tf.reduce_sum(nn, axis=1) + RAD
-        # make diag zeros to remove self neighbours
-        #a_list = np.arange(n_atoms)
-        #nn[:, a_list, a_list] = 0.
-        #diag = tf.zeros(nn.shape[0:-1])
-        #diag = tf.zeros_like(nn[:,-1])
-        #print('diag\n', diag.shape)
-        #print(sess.run(diag))
-        RAD = tf.linalg.set_diag(nn, diagonal=tf.zeros_like(nn[:,-1]))
-
-        print('RAD\n', RAD.shape)
-        print(sess.run(RAD))
-
-
-
-
-        r_tri_RAD = r_tri * RAD
-        print('r_tri_RAD\n', r_tri_RAD.shape)
-        print(sess.run(r_tri_RAD))
-
-        #flatten r so that _NC2 values are left
-        tri = tf.linalg.band_part(r_tri, -1, 0) #lower rs
-        tri2 = tf.linalg.band_part(r_tri_RAD, -1, 0) #lower RAD
-        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
-        nonzero_values = tf.gather_nd(tri2, nonzero_indices)
-        r_flat_RAD = tf.reshape(nonzero_values, 
-                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
-        print('r_flat_RAD', r_flat_RAD.shape)
-        print(sess.run(r_flat_RAD))
-        # replace zeros with ones
-        safe = tf.where(tf.equal(r_flat_RAD, 0.), 1., r_flat_RAD)
-        print('safe', safe.shape)
-        print(sess.run(safe))
-        # 1/r and replace 1s with zeros
-        recip_r_flat_RAD = tf.where(r_flat_RAD < 1., 0., 1. / safe)
-        print('recip_r_flat_RAD', recip_r_flat_RAD.shape)
-        print(sess.run(recip_r_flat_RAD))
-        flat_RAD = tf.where(r_flat_RAD < 1., 0., 1.)
-        print('flat_RAD', flat_RAD.shape)
-        print(sess.run(flat_RAD))
-
-        np_flat_RAD = Converter.get_RAD_neighbours(
-                molecule.coords[strt:end].reshape(-1, n_atoms, 3))
-        print('np_flat_RAD\n', np_flat_RAD)
-
-
-
-        #sys.exit()
-
-
-
-        # for cutoff 
-        rc = 4
-        #r_flat = tf.where(tf.math.greater(r_flat, rc), tf.zeros_like(r_flat), 
-                #r_flat) # set rs grater than rc too zero
-
-        # for RAD
-        r_flat = r_flat * flat_RAD
-        print('r_flat', r_flat.shape)
-        print(sess.run(r_flat))
-        print('mat_r\n', molecule.mat_r[strt:end])
-
-        au2kcalmola = 627.5095 * 0.529177
-        au2kcalmola = tf.constant(au2kcalmola, dtype=tf.float32)
-        _NRF = ((atoms_flat * au2kcalmola) / (r_flat ** 2))
-
-        '''
-        triangle_qqr2 = Triangle(_NRF)
-        triangle_r = Triangle(r_flat)
-        Rc = 5
-        nu = 4
-        Rs = 0
-        less_mask = tf.math.less_equal(triangle_r, Rc) #Bools inside
-        less_r = triangle_r * tf.cast(less_mask, dtype=tf.float32)
-        fc_all = 0.5 * tf.math.cos(math.pi * triangle_r / Rc) + 0.5
-        fc = fc_all * tf.cast(less_mask, dtype=tf.float32) #only keep less rc
-        zeros = tf.zeros([fc.shape[0], fc.shape[1]])
-        fc = tf.linalg.set_diag(fc, zeros) #make diags zero
-        Gij = tf.math.exp(-nu * (triangle_qqr2 - Rs) ** 2) * fc
-        Gij = tf.reduce_sum(Gij, 1)
-
-        #print('zeros', zeros.shape, sess.run(zeros))
-        print('Gij', sess.run(Gij))
-        print(molecule.acsf[0:3])
-        print('fc', sess.run(fc))
-        print('less_r', sess.run(less_r))
-        print('triangle_r', sess.run(triangle_r))
-        #sys.exit()
-        '''
-
-
-        print('_NRF', _NRF.shape)
-        _NRF = tf.where(tf.math.is_inf(_NRF), tf.zeros_like(_NRF), 
-                _NRF) #remove infs 
-        print(sess.run(_NRF))
-        print(molecule.mat_NRF[strt:end])
-
-
-        #FOR ENERGY get energy 1/r_ij eij matrix
-        # replace zeros with ones
-        #safe = tf.where(tf.equal(r_flat, 0.), 1., r_flat)
-        # 1/r and replace 1s with zeros
-        #recip_r = tf.where(r_flat < 1., 0., 1. / safe)
-        
-        recip_r = 1 / r_flat
-
-        if rc != 0:
-            recip_r = tf.where(tf.math.is_inf(recip_r), 
-                    tf.zeros_like(recip_r), recip_r) #remove infs 
-
-        recip_r2 = 1 / r_flat ** 2
-
-        if rc != 0:
-            recip_r2 = tf.where(tf.math.is_inf(recip_r2), 
-                    tf.zeros_like(recip_r2), recip_r2) #remove infs 
-
-
-        if bias_type == '1/r':
-            eij_E = tf.expand_dims(recip_r, 1)
-        if bias_type == 'r':
-            eij_E = tf.expand_dims(r_flat, 1)
-        if bias_type == 'qq/r2':
-            eij_E = tf.expand_dims(_NRF, 1)
-        #print('eij_E', sess.run(eij_E))
-        norm_recip_r = tf.reduce_sum(recip_r2, axis=1) ** 0.5
-        norm_recip_r = tf.expand_dims(norm_recip_r, 1)
-        norm_recip_r = tf.expand_dims(norm_recip_r, 2)
-        #print('norm', sess.run(norm_recip_r))
-        print('!!!!!! normalising eij_E with norm(1/R)')
-        eij_E = eij_E / norm_recip_r
-        print('eij_E', eij_E.shape) 
-        print(sess.run(eij_E))
-        print('mat_bias', molecule.mat_bias[strt:end].shape) 
-        print(molecule.mat_bias[strt:end])
-
-        #### FOR FORCES
-        r = Triangle(r_flat)
-        r2 = tf.expand_dims(r, 3)
-        eij_F2 = diff / r2
-        eij_F = tf.where(tf.math.is_nan(eij_F2), tf.zeros_like(eij_F2), 
-                eij_F2) #remove nans 
-
-        new_eij_F = []
-        n_atoms = coords.shape.as_list()[1]
-        for i in range(n_atoms):
-            for x in range(3):
-                atom_i = eij_F[:,i,:,x]
-                s = []
-                _N = -1
-                count = 0
-                a = [k for k in range(n_atoms) if k != i]
-                for i2 in range(n_atoms):
-                    for j2 in range(i2):
-                        _N += 1
-                        if i2 == i:
-                            s.append(atom_i[:,a[count]])
-                            count += 1
-                        elif j2 == i:
-                            s.append(atom_i[:,a[count]])
-                            count += 1
-                        else:
-                            s.append(tf.zeros_like(atom_i[:,0]))
-                s = tf.stack(s)
-                s = tf.transpose(s)
-                new_eij_F.append(s)
-
-        eij_F = tf.stack(new_eij_F)
-        #print('eij_F', eij_F.shape)
-        #print(sess.run(eij_F))
-        #eij_F = eij_F * recip_r2
-        #print('!!! 1/r2 bias included to eij_F matrix')
-        eij_F = tf.transpose(eij_F, perm=[1,0,2])
-        eij_FE = tf.concat([eij_F, eij_E], axis=1)
-        if rc != 0:
-            eij_FE = tf.where(tf.math.is_inf(eij_FE), tf.zeros_like(eij_FE), 
-                    eij_FE) #remove infs 
-            eij_FE = tf.where(tf.math.is_nan(eij_FE), tf.zeros_like(eij_FE), 
-                    eij_FE) #remove nans 
-        print('eij_FE', eij_FE.shape)
-        print(sess.run(eij_FE))
-        print('mat_eij', molecule.mat_eij[strt:end])
-
-        inv_eij = tf.linalg.pinv(eij_FE)
-        qs = tf.linalg.matmul(inv_eij, tf.transpose(FE))
-        qs = tf.transpose(qs, perm=[1,0,2])
-        qs = tf.linalg.diag_part(qs)
-        qs = tf.transpose(qs) #* recip_r
-
-        print('qs', qs.shape)
-        print(sess.run(qs))
-        print()
-        print('mat_FE', molecule.mat_FE[strt:end].shape)
-        print(molecule.mat_FE[strt:end])
-        print('max_FE', np.max(np.abs(molecule.mat_FE.flatten())))
-
-
-        if molecule.mat_FE.shape[1] == _NC2+1:
-            #ones = tf.ones([tf.shape(r_flat)[0], 1], dtype=tf.float32)
-
-            ones = tf.ones_like(r_flat)
-            ones = tf.reshape(ones[:,0], shape=(-1, 1))
-            r_flat_test = tf.concat([r_flat, ones], 1)
-            print(r_flat.shape, ones.shape, r_flat_test.shape)
-
-            recip_r_flat = 1 / r_flat_test
-            print(sess.run(recip_r_flat))
-
-            if rc != 0:
-                recip_r_flat = tf.where(tf.math.is_inf(recip_r_flat), 
-                        tf.zeros_like(recip_r_flat), 
-                        recip_r_flat) #remove infs 
-                recip_r_flat = tf.where(tf.math.is_nan(recip_r_flat), 
-                        tf.zeros_like(recip_r_flat), 
-                        recip_r_flat) #remove nans 
-
-            norm_recip_r = tf.reduce_sum(recip_r_flat ** 2, axis=1, 
-                    keepdims=True) ** 0.5
-            r_flat_test = recip_r_flat / norm_recip_r
-
-            print('r_flat_test', r_flat_test.shape) 
-            print(sess.run(r_flat_test))
-            print('mat_bias', molecule.mat_bias[strt:end].shape) 
-            print(molecule.mat_bias[strt:end])
-
-            #print(r_flat_test.shape, tf.transpose(mat_FE).shape)
-            #print(sess.run(r_flat_test))
-
-            E_test = tf.linalg.matmul(r_flat_test, tf.transpose(mat_FE))
-            print(r_flat_test.shape, tf.transpose(mat_FE).shape)
-            E_test = tf.linalg.diag_part(E_test) #only choose diags
-            print('*****', 'E_test', E_test.shape)
-            print(sess.run(E_test))
-            E_test2 = tf.einsum('bi, ib -> b', r_flat_test, 
-                    tf.transpose(mat_FE))
-            print('*****', 'E_test2', E_test2.shape)
-            print(sess.run(E_test2))
-            print('E', molecule.energies[strt:end])
-            print('mat_bias', molecule.mat_bias[strt:end])
-            print('*****', 'bias tf', r_flat_test.shape)
-            print(sess.run(r_flat_test))
-
-        if molecule.mat_FE.shape[1] == _NC2+n_atoms:
-            r_tri = Triangle(r_flat)
-            sumrs = (tf.reduce_sum(r_tri, 1)) / n_atoms #recip
-            r_flat_test = tf.concat([r_flat, sumrs], 1) 
-            E_test = tf.einsum('bi, ib -> b', r_flat_test, 
-                    tf.transpose(mat_FE))
-            E_test = tf.reshape(E_test, shape=(tf.shape(tri)[0], 1)) 
-                    #need to define shape
-            print('*****', 'E_test3', E_test.shape)
-            print(sess.run(E_test))
-            E_test2 = tf.reduce_sum(mat_FE, 1, keepdims=True)
-            print('*****', 'E_test4', E_test2.shape)
-            print(sess.run(E_test2))
-
-        if bias_type == '1/r':
-            #Q3 = Triangle(recip_r)
-            norm_recip_r = tf.reduce_sum(recip_r ** 2, axis=1, 
-                    keepdims=True) ** 0.5
-            norm_recip_r = recip_r / norm_recip_r
-            Q3 = Triangle(norm_recip_r)
-        if bias_type == 'r':
-            Q3 = Triangle(r_flat)
-        if bias_type == 'qq/r2':
-            Q3 = Triangle(_NRF)
-        #Q3 = Triangle(_NRF)
-        #Q3 = Triangle(recip_r)
-        eij_E = tf.expand_dims(Q3, 3)
-        #dot product of
-        qs_tri = Triangle(qs)
-        E2 = tf.einsum('bijk, bij -> bk', eij_E, qs_tri)
-        E_tf = E2/2
-        #'''
-
-        print('E_tf', E_tf.shape)
-        print(sess.run(E_tf))
-        print()
-        print(molecule.energies[strt:end])
-
-
-
-        print(datetime.now() - startTime)
-        sys.stdout.flush()
+        print('mat_FE', mat_FE.shape)
+        print(sess.run(mat_FE))
 
 
         #sys.exit()
@@ -1341,81 +965,115 @@ def run_force_pred(input_files='input_files',
         np.savetxt('eij_FE.dat', molecule.mat_eij[:].reshape(-1,_NC2))
         #sys.exit()
         '''
-        for i in range(1):
-            print('\ni', i)
-            print('\nmat_NRF', molecule.mat_NRF[i])
-            print('\nmat_FE', molecule.mat_FE[i])
-            print('\nsum mat_FE', np.sum(molecule.mat_FE[i]))
-            print('\nget recomposed FE')
-            print('actual')
-            print(molecule.forces[i])
-            print(molecule.energies[i])
-            n_atoms = len(molecule.atoms)
-            _NC2 = int(n_atoms*(n_atoms-1)/2)
-            '''
-            recompF, recompE = Converter.get_recomposed_FE(
-                    [molecule.coords[i]], 
-                    [molecule.mat_FE[i]], 
-                    #[molecule.mat_FE[i] / molecule.mat_eij[i][-1]], #add back bias 
-                    molecule.atoms, n_atoms, _NC2, bias_type)
-            print('\nrecomp from FE')
-            print(recompF)
-            print(recompE)
-            '''
-            print('\nrecomp from FE with dot')
-            #recompF = np.dot(molecule.mat_eij[i][:-1], molecule.mat_FE[i] / 
-                    #molecule.mat_eij[i][-1]) #add back bias
-            recompF = np.dot(molecule.mat_eij[i][:-1], molecule.mat_FE[i])
-            recompE = np.dot(molecule.mat_bias[i], molecule.mat_FE[i])
-
-            print(recompF)
-            print(recompE)
-            '''
-            print('\nrecomp from F only')
-            recompF2 = Conservation.get_recomposed_forces(
-                [molecule.coords[i]], [molecule.mat_F[i]], n_atoms, _NC2)
-            print(recompF2)
-            '''
-
-
-        '''
-        lower_mask = np.tri(n_atoms, dtype=bool, k=-1) #True False mask
-        #print(lower_mask)
-        out = np.zeros((n_atoms, n_atoms))
-
-        molecule.atomFE = np.zeros((len(molecule.mat_FE), n_atoms))
-        molecule.atomNRF = np.zeros((len(molecule.mat_NRF), n_atoms))
-        for j in range(len(molecule.mat_FE)):
-            out_copy = np.copy(out)
-            out_copy[lower_mask] = molecule.mat_FE[j]
-            ult = out_copy + out_copy.T
-            atomFE = np.sum(ult, axis=0) / 2
-            molecule.atomFE[j] = atomFE
-            if j == 0:
-                print('upper lower triangle ult atomFE\n', ult)
-            out_copy2 = np.copy(out)
-            out_copy2[lower_mask] = molecule.mat_NRF[j]
-            ult = out_copy2 + out_copy2.T
-            atomNRF = np.sum(ult, axis=0) / 2
-            molecule.atomNRF[j] = atomNRF
-            if j == 0:
-                print('upper lower triangle ult atomNRF\n', ult)
-        #np.savetxt('atomFE.txt', molecule.atomFE)
-        #np.savetxt('atomNRF.txt', molecule.atomNRF)
-        print('column sums, molecule.atomFE\n', molecule.atomFE[0])
-        out[lower_mask] = molecule.mat_FE[0]
-        out3 = out + out.T
-        print('\nupper lower triangle out3\n', out3)
-        atomFE = np.sum(out3, axis=0) / 2
-        print('column sums, atomFE', atomFE)
-        print(molecule.atoms)
-        print('sum atomFE', np.sum(atomFE))
-        print('atomNRF', molecule.atomNRF[0])
-        '''
 
         print(datetime.now() - startTime)
         sys.stdout.flush()
         #sys.exit()
+
+
+        '''
+        ##!!!!!!!!! over-riding mat_FE
+        #end=1
+        Converter.get_interatomic_energies_directions(molecule, bias_type)
+        print('mat_eij', molecule.mat_eij[strt:end].shape, 
+                molecule.mat_eij[strt:end])
+
+        coords = molecule.coords[strt:end].reshape(-1, n_atoms, 3)
+        F = molecule.forces[strt:end].reshape(-1, n_atoms, 3)
+        E = molecule.energies[strt:end].reshape(-1, 1)
+        mat_FE = molecule.mat_FE[strt:end].reshape(end-strt, -1)
+        coords = tf.convert_to_tensor(coords, np.float32)
+        F = tf.convert_to_tensor(F, np.float32)
+        E = tf.convert_to_tensor(E, np.float32)
+        mat_FE = tf.convert_to_tensor(mat_FE, np.float32)
+
+
+        a = tf.expand_dims(coords, 2)
+        b = tf.expand_dims(coords, 1)
+        diff = a - b
+        diff2 = tf.reduce_sum(diff**2, axis=-1) #get sqrd diff
+        #flatten diff2 so that _NC2 values are left
+        tri = tf.linalg.band_part(diff2, -1, 0) #lower
+        nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+        nonzero_values = tf.gather_nd(tri, nonzero_indices)
+        diff_flat = tf.reshape(nonzero_values, 
+                shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+        r_flat = diff_flat**0.5
+
+        # get eij Proojection matrix as used for force recomp
+        r = Triangle(r_flat)
+        r2 = tf.expand_dims(r, 3)
+        safe = tf.where(tf.equal(r2, 0.), 1., r2)
+        eij_ = diff / safe
+        print('eij_', eij_.shape)
+
+        # now reduce the eij Proj matrix so squished (3,b,NC2) directions
+        _NC2 = mat_FE.shape.as_list()[-1]
+        eij_xyz = []
+        for x in range(3):
+            #flatten so that _NC2 values are left
+            tri = tf.linalg.band_part(eij_[:,:,:,x], -1, 0) #lower
+            print('tri', tri.shape)
+            nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+            nonzero_values = tf.gather_nd(tri, nonzero_indices)
+            x_flat = tf.reshape(nonzero_values, 
+                    shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+            print('x_flat', x_flat.shape)
+            eij_xyz.append(x_flat)
+        eij_xyz_ = tf.transpose(tf.stack(eij_xyz), perm=[1,0,2])  # shape is (b,3,NC2)
+        print('eij_xyz_', eij_xyz_.shape)
+        #print(sess.run(eij_xyz_))
+
+        _E3 = tf.einsum('bij, bj -> bi', eij_xyz_, mat_FE)
+        print('_E3', _E3.shape)
+        print(sess.run(_E3))
+        _E = tf.reduce_sum(_E3, 1, keepdims=True)
+        print('_E', _E.shape)
+        print(sess.run(_E))
+        print('actual E', molecule.energies[strt:end])
+        '''
+
+
+        '''
+        #### FOR FORCES
+        r = Triangle(r_flat)
+        r2 = tf.expand_dims(r, 3)
+        eij_F2 = diff / r2
+        eij_F = tf.where(tf.math.is_nan(eij_F2), tf.zeros_like(eij_F2), 
+                eij_F2) #remove nans 
+        #print('eij_F', eij_F.shape)
+        #print(sess.run(eij_F))
+        #print(sess.run(eij_F[:,:,:,0]))
+
+        eij_xyz = []
+        for x in range(3):
+            #flatten so that _NC2 values are left
+            tri = tf.linalg.band_part(eij_F[:,:,:,x], -1, 0) #lower
+            nonzero_indices = tf.where(tf.not_equal(tri, tf.zeros_like(tri)))
+            nonzero_values = tf.gather_nd(tri, nonzero_indices)
+            x_flat = tf.reshape(nonzero_values, 
+                    shape=(tf.shape(tri)[0], -1)) #reshape to _NC2
+            #print('x_flat', x_flat.shape)
+            #print(sess.run(x_flat))
+            eij_xyz.append(x_flat)
+        eij_xyz_ = tf.stack(eij_xyz) 
+        print('eij_xyz_', eij_xyz_.shape)
+        print(sess.run(eij_xyz_))
+
+        mat_FE = molecule.mat_FE[strt:end].reshape(end-strt, -1)
+        mat_FE = tf.convert_to_tensor(mat_FE, np.float32)
+
+        _E3 = tf.einsum('ibj, bj -> bi', eij_xyz_, mat_FE)
+        print('_E3', _E3.shape)
+        print(sess.run(_E3))
+        _E = tf.reduce_sum(_E3, -1)#, keepdims=True)
+        print('_E', _E.shape)
+        print(sess.run(_E))
+        print('actual E', molecule.energies[strt:end])
+        '''
+
+        print(datetime.now() - startTime)
+        sys.stdout.flush()
 
     #molecule.mat_FE = molecule.mat_F
     #print('\n!!!!!!!!! *** using mat_E instead of mat_FE *** !!!!!!!!!!!')
