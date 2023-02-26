@@ -48,8 +48,12 @@ class MM(object):
 
     #def calculate_step(coords,coords_prev,forces,delta_t,types,timestep):
     def calculate_step(coords,coords_prev,forces,delta_t,weights,timestep):
-        #this code assumes that forces are in kcal mol-1 A-1
-        #and coords are in A and delta t is in femtoseconds
+        '''
+        Not used anymore, replaced by OpenMM, was used to for MD with 
+        predicted forces.
+        this code assumes that forces are in kcal mol-1 A-1
+        and coords are in A and delta t is in femtoseconds.
+        '''
         C = coords*1*10**-10
         prev_C = coords_prev*1*10**-10
         #weights = np.zeros((len(types),3))
@@ -81,6 +85,7 @@ class MM(object):
 
     def use_gaff(coords):
         '''
+        Never used, Amber and OpenMM used instead for GAFF implementation
         CHARGES (E = q1*q2/r^2, where E in kcal/mol, r in Ang)
         C   = 1.99351962E+00
         O   = -1.10390693E+01

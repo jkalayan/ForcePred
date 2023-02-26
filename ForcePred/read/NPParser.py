@@ -10,6 +10,8 @@ import numpy as np
 
 class NPParser(object):
     '''
+    Separately parse through atom numbers, coordinates, forces and energies 
+    in numpy array formatted files.
     '''
 
     def __init__(self, file_atoms, files_coords, files_forces, 

@@ -15,7 +15,13 @@ class OPTParser(object):
     '''
     Reads in a list of Gaussian scan output files, finds flags 
     listed below and saves coordinates, forces and energies of 
-    optimised structures.
+    structures.
+    Optimised structure Gaussian files and non-optimised single-point
+    energy calculated structure Gaussian files have slightly different 
+    formats, so ensure to include opt= flag when running, e.g. 
+
+    OPTParser(input_files, molecule, opt=False) # for single-point file
+
     To get the correctly formatted file, ensure symmetry is on.
 
     An example Guassian scan instruction:

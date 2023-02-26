@@ -41,7 +41,7 @@ class Converter(object):
         self.atoms = molecule.atoms
         self.mat_r = None
         self.mat_NRF = None
-        self.get_interatomic_forces(molecule)
+        #self.get_interatomic_forces(molecule)
         if hasattr(molecule, 'charges'):
             self.charges = molecule.charges
             self.get_interatomic_charges(molecule)
@@ -562,17 +562,19 @@ class Converter(object):
         _NC2 = int(n_atoms * (n_atoms-1)/2)
         n_structures = len(molecule.coords)
 
-        #force_bias = False
+        #force_bias = True #False
         #qbias = False
-        #remove_ebias = True
+        remove_ebias = False #True #
         #norm = True
         #use_RAD = False
-        extra_cols = 1 #n_atoms #1 #
+        #extra_cols = n_atoms #1 #
         rc = 0
 
         print('\nbias_type: {} \nforce_bias: {} \nq_bias: {} '\
-                '\nremove_ebias: {} \nnorm: {} \nuse_RAD: {}'.format(
-                bias_type, force_bias, qbias, remove_ebias, norm, use_RAD))
+                '\nremove_ebias: {} \nnorm: {} \nuse_RAD: {} '\
+                '\nextra_cols:{}'.format(
+                bias_type, force_bias, qbias, remove_ebias, norm, use_RAD,
+                extra_cols))
 
         molecule.mat_NRF = np.zeros((n_structures, _NC2))
         molecule.mat_r = np.zeros((n_structures, _NC2))
@@ -581,7 +583,11 @@ class Converter(object):
         molecule.mat_FE = np.zeros((n_structures, _NC2+extra_cols))
         molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, 
                 _NC2+extra_cols))
-        molecule.flat_RAD = np.ones((n_structures, _NC2))
+        if use_RAD:
+            molecule.flat_RAD = np.ones((n_structures, _NC2))
+
+        #molecule.mat_atomE = np.zeros((n_structures, n_atoms,#+1, 
+                #_NC2+extra_cols))
 
         #molecule.flat_RAD = Converter.get_RAD_neighbours(
                 #molecule.coords[0].reshape((-1,n_atoms,3)))
@@ -613,6 +619,12 @@ class Converter(object):
                             molecule.coords[s][j])
                     if r > rc and rc != 0:
                         r = 0
+                    '''
+                    bias_type = '1/r'
+                    if r > 2:
+                        bias_type = 'r'
+                    '''
+
                     molecule.mat_r[s,_N] = r
                     '''
                     if r < rc:
@@ -640,8 +652,8 @@ class Converter(object):
                     if bias_type == 'eij':
                         molecule.mat_bias[s,_N] = 0 
                     if extra_cols == n_atoms:
-                        molecule.mat_bias[s][_NC2+i] += (r) / n_atoms #zi * zj/ r / n_atoms
-                        molecule.mat_bias[s][_NC2+j] += (r) / n_atoms #zi * zj /r / n_atoms
+                        molecule.mat_bias[s][_NC2+i] += (bias) / n_atoms #zi * zj/ r / n_atoms
+                        molecule.mat_bias[s][_NC2+j] += (bias) / n_atoms #zi * zj /r / n_atoms
                     molecule.mat_eij[s,n_atoms*3,_N] = bias
                     for x in range(0, 3):
                         val = ((molecule.coords[s][i][x] - 
@@ -716,6 +728,8 @@ class Converter(object):
 
 
             mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2+extra_cols))
+            #neg_mat_bias2 = -1 * np.copy(molecule.mat_bias[s].reshape((1,_NC2+extra_cols)))
+            #neg_mat_bias2 = molecule.mat_unnorm_bias[s].reshape((1,_NC2+extra_cols)) #np.zeros_like(mat_bias2)
 
             #norm_NRF = np.sum((molecule.mat_NRF[s]) ** 2) ** 0.5
             #mat_bias2 = mat_bias2 / norm_NRF ###!!!!normalising eij_E
@@ -723,14 +737,68 @@ class Converter(object):
                 #norm_r = np.sum((molecule.mat_r[s]) ** 2) ** 0.5
                 #mat_bias2 = mat_bias2 / norm_r
 
+            '''
+            #if s < 2:
+            #print('\ns', s)
+            mat_bias2 = mat_bias2 / np.sum(mat_bias2)
+            #print('mat_bias2', mat_bias2.shape, mat_bias2)
+            #print('E', molecule.energies[s].shape, molecule.energies[s])
+            inv_eij = mat_bias2.T #np.linalg.pinv(mat_bias2)
+            #print('inv_eij', inv_eij.shape, inv_eij)
+            q_E = np.matmul(inv_eij, molecule.energies[s])
+            #print('q_E', q_E)
+            #print('sum_q_E', np.sum(q_E))
+            #print('E', molecule.energies[s])
+            atomEs = np.zeros((n_atoms))#+1))
+            _N = -1
+            for i in range(n_atoms):
+                for j in range(i):
+                    _N += 1
+                    atomEs[i] += q_E[_N] / 2
+                    atomEs[j] += q_E[_N] / 2
+                    molecule.mat_atomE[s,i,_N] = mat_bias2[0,_N] #q_E[_N]
+                    molecule.mat_atomE[s,j,_N] = mat_bias2[0,_N] #q_E[_N]
+            #molecule.mat_atomE[s,n_atoms,:] = 1
+            #atomEs[n_atoms] = 0
+            #print('mat_atomE', molecule.mat_atomE[s])
+            #print('atomEs', atomEs)
+            #print('sum atomEs', np.sum(atomEs))
+            eij_F_atomE = np.concatenate((mat_Fvals2, 
+                    #molecule.mat_atomE[s].reshape((n_atoms+1,-1))), 
+                    molecule.mat_atomE[s].reshape((n_atoms,-1))), 
+                    axis=0)
+            F_atomE = np.concatenate((forces2.flatten(), atomEs.flatten()))
+            q_F_atomE = np.matmul(np.linalg.pinv(eij_F_atomE), F_atomE)
+            molecule.mat_FE[s] = q_F_atomE
+            #print('q_F_atomE', q_F_atomE.shape, q_F_atomE)
+            #print('sum q_F_atomE', np.sum(q_F_atomE))
+            reco_FE = np.dot(eij_F_atomE, q_F_atomE)
+            #print('reco_FE', reco_FE)
+            #print('sum_reco_atomE', np.sum(reco_FE[-n_atoms-1:]))
+            #print('F', molecule.forces[s].flatten())
+            #print('\n\n\n')
+
+            #sys.exit()
+            '''
+
+
             _E = molecule.energies[s].reshape(1)
             #decomp_E = np.matmul(np.linalg.pinv(mat_bias2), _E)
 
             mat_FE = np.concatenate((mat_Fvals2, mat_bias2), axis=0)
-            _FE = np.concatenate([forces2.flatten(), _E.flatten()])
+            _FE = np.concatenate([forces2.flatten() , _E.flatten()])
+
+            #ones = np.ones_like(mat_bias2)
+            #mat_FE = np.concatenate((mat_Fvals2, mat_bias2, ones), axis=0)
+            #_FE = np.concatenate([forces2.flatten() , _E.flatten(), [0]])
+
+            #mat_FE = np.concatenate((mat_Fvals2, mat_bias2, neg_mat_bias2), 
+                    #axis=0)
+            #_FE = np.concatenate([forces2.flatten(), _E.flatten(), 
+                    #_E.flatten()])
 
             #mat_FE = mat_Fvals2
-            #_FE = forces2.flatten()
+            #_FE = forces2.flatten()  #* (_E / (3*n_atoms))
 
             if rc != 0:
                 for f in mat_FE:
@@ -745,6 +813,8 @@ class Converter(object):
 
             decomp_FE = np.matmul(np.linalg.pinv(mat_FE), _FE)
             molecule.mat_FE[s] = decomp_FE
+            #if s < 10:
+                #print(np.sum(molecule.mat_FE[s]), molecule.energies[s])
 
 
 
@@ -752,6 +822,8 @@ class Converter(object):
             _FE = forces2.flatten()
 
             decompFE = np.matmul(np.linalg.pinv(mat_FE), _FE)
+            #if s < 3:
+                #print('***** sum_mat_F\n', np.sum(decompFE))
             decompFE = decompFE.reshape((1,-1)) #q_F
             _E = _E.reshape((1,1))
 
@@ -811,11 +883,12 @@ class Converter(object):
 
 
             #'''
-            if s < 1:
+            if s < 0:
                 print('\n\n', s)
                 print('mat_NRF\n', molecule.mat_NRF[s])
                 print('mat_FE\n', molecule.mat_FE[s].shape, 
                         molecule.mat_FE[s])
+                print('sum mat_FE\n', np.sum(molecule.mat_FE[s]))
                 print('mat_r\n', molecule.mat_r[s])
                 print('mat_bias\n', molecule.mat_bias[s].shape, 
                         molecule.mat_bias[s])
@@ -848,6 +921,7 @@ class Converter(object):
                         recompFE = np.dot(molecule.mat_eij[s], qFE)
                     print('recompE\n', recompFE[-1])
                     print('recompF\n', recompFE[:-1].reshape((-1,3)))
+                    print('sum recompF\n', np.sum(recompFE[:-1].reshape((-1,3))))
                     #print('E diff\n', molecule.energies[s] - recompFE[-1])
                     #print('F diff\n', 
                             #molecule.forces[s] - recompFE[:-1].reshape((-1,3)))
@@ -1503,6 +1577,10 @@ class Converter(object):
         return other_rotated, _U
 
     def translate_coords(coords, atoms):
+        '''
+        Translate coordinates so that the centre of mass of the molecule is
+        at (0,0,0).
+        '''
         n_atoms = len(atoms)
         masses = np.array([Converter._ZM[a] for a in atoms])
         #masses = np.array([1]*n_atoms)
@@ -1517,6 +1595,9 @@ class Converter(object):
         #return c_rotated
 
     def rotate_forces(forces, coords, masses, n_atoms):
+        '''
+        Used in get_rotated_forces function below.
+        '''
         _PA, _MI, com = Converter.get_principal_axes(coords, masses)
         n_f_rotated = np.zeros((n_atoms,3))
         n_c_rotated = np.zeros((n_atoms,3))
@@ -1532,6 +1613,12 @@ class Converter(object):
         return n_f_rotated, n_c_rotated
 
     def get_rotated_forces(molecule):
+        '''
+        Not used, was used to rotate Cartesian forces along the principal
+        axis (x-axis is principal axis of molecule, y-axis the next and 
+        z-axis perpendicular to x and y) of a molecule instead of the 
+        xyz frame.
+        '''
         n_structures = len(molecule.coords)
         n_atoms = len(molecule.atoms)
         masses = np.array([Converter._ZM[a] for a in molecule.atoms])
@@ -1568,6 +1655,9 @@ class Converter(object):
                 molecule.rotated_coords)
 
     def get_r_from_NRF(_NRF, atoms):
+        '''
+        Not used
+        '''
         rs = np.zeros_like(_NRF)
         n_atoms = len(atoms)
         n = -1
@@ -1582,7 +1672,10 @@ class Converter(object):
 
 
     def get_coords_from_NRF(_NRF, atoms, coords, scale, scale_min):
-
+        '''
+        Not used now. Was used to see if coords could be derived from
+        NRFs
+        '''
         n_atoms = len(atoms)
         #print(_NRF)
         #scale_NRF = _NRF / np.amax(scale)

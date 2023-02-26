@@ -29,6 +29,8 @@ import sys
 
 class OpenMM_classical(object):
     '''
+    This class is used to run classical MD simulations with
+    the OpenMM toolkit.
     '''
     def __init__(self):
         self.coords = []
@@ -37,7 +39,25 @@ class OpenMM_classical(object):
 
 
     def get_system(masses, dihedrals, thetas, k):
-        '''setup system for MD with OpenMM'''
+        '''
+        setup system for MD with OpenMM.
+
+        Variables are included for setting the dihedral angle
+        between four atoms and the force constant used to keep
+        the angle during simulation. It is used to sample
+        molecular conformations around semi-fixed dihedral angles.
+
+        Vars:
+
+        masses: mass of atoms in molecule (not used here)
+
+        dihedral: list of lists of four atom indices in dihedral.
+
+        thetas: list of each dihedral angle to fix.
+
+        k: force constant used to fix dihedral angles.
+
+        '''
 
         #prmtop = AmberPrmtopFile('data/molecules.prmtop')
         #inpcrd = AmberInpcrdFile('data/molecules.inpcrd')
@@ -131,7 +151,8 @@ class OpenMM_classical(object):
 
 
     def run_md(system, simulation, md, integrator, nsteps, saved_steps):
-        '''Run MD with OpenMM for nsteps'''
+        '''Run MD with OpenMM for nsteps and write coords, forces, 
+        velocities and change in energy to files.'''
 
         n_atoms_all = system.getNumParticles()
         n_atoms_model = len(md.atoms)

@@ -2,7 +2,7 @@
 
 '''
 This module is for reading in forces, coordinates and energies from 
-LAMMPS data files. 
+AMBER data files. 
 '''
 
 import MDAnalysis       
@@ -13,8 +13,8 @@ import numpy as np
 
 class AMBERParser(object):
     '''
-    Ensure unwrapped atom coordinates 9xu,yu,zu are used from 
-    LAMMPS MD simulations.
+    Use MDAnalysis to read in amber topology, atom coordinates
+    and atom forces.
     '''
 
     def __init__(self, amb_top, amb_coords, amb_forces, molecule):

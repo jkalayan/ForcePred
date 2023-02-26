@@ -134,15 +134,26 @@ class TransformNRF(Layer):
 
 
 class SplitNRF(Layer):
-    def __init__(self, bonded_indices, nb_indices, **kwargs):
+    def __init__(self, _NC2, bonded_indices, nb_indices, **kwargs):
         super(SplitNRF, self).__init__()
+        self._NC2 = _NC2
         self.bonded_indices = bonded_indices
         self.nb_indices = nb_indices
 
-    def call(self, _NRF):
-         
-        b_NRF = tf.gather(_NRF, self.bonded_indices, axis=1)
-        nb_NRF = tf.gather(_NRF, self.nb_indices, axis=1)
+    def call(self, NRF_r_flat):
+        _NRF, r_flat = NRF_r_flat
+        recip_r = 1 / r_flat
+        #b_NRF = tf.gather(_NRF, self.bonded_indices, axis=1)
+        #b_NRF = tf.gather(recip_r, self.bonded_indices, axis=1)
+        b_NRF = _NRF #recip_r
+        #nb_NRF = tf.gather(_NRF, self.nb_indices, axis=1)
+        #nb_NRF = tf.gather(recip_r,, self.nb_indices, axis=1)
+        nb_NRF = recip_r #_NRF
+
+        b_NRF = tf.reshape(b_NRF, 
+                shape=(tf.shape(b_NRF)[0], self._NC2))
+        nb_NRF = tf.reshape(nb_NRF, 
+                shape=(tf.shape(nb_NRF)[0], self._NC2))
 
         return b_NRF, nb_NRF
 
@@ -242,7 +253,7 @@ class UnscaleQ(Layer):
         decomp_scaled = tf.reshape(decomp_scaled, 
                 shape=(tf.shape(decomp_scaled)[0], -1))
         decomp = (decomp_scaled - 0.5) * (2 * self.max_Q)
-        decomp = tf.reshape(decomp, shape=(tf.shape(decomp)[0], self._NC2))
+        #decomp = decomp_scaled * 1
         return decomp
 
 
@@ -252,16 +263,14 @@ class ScaleQ(Layer):
         self._NC2 = _NC2
         self.max_Q = max_Q
 
-    #def compute_output_shape(self, input_shape):
-        #batch_size = input_shape[0]
-        #return (batch_size, self._NC2)
+    def compute_output_shape(self, input_shape):
+        batch_size = input_shape[0]
+        return (batch_size, self._NC2)
 
     def call(self, decomp):
         #scale decompFE
         decomp = tf.reshape(decomp, shape=(tf.shape(decomp)[0], -1))
         decomp_scaled = (decomp / (2 * self.max_Q)) + 0.5
-        decomp_scaled = tf.reshape(decomp_scaled, 
-                shape=(tf.shape(decomp)[0], self._NC2))
         return decomp_scaled
 
 
@@ -294,39 +303,6 @@ class Linear(keras.layers.Layer):
         return tf.matmul(inputs, self.w) + self.b
 
 
-class FE_Decomposition_wrong(Layer):
-    def __init__(self, n_atoms, _NC2, **kwargs):
-        super(FE_Decomposition_wrong, self).__init__()
-        self.n_atoms = n_atoms
-        self._NC2 = _NC2
-
-    #def build(self, input_shape):
-        #self.kernel = self.add_weight('kernel', 
-                #shape=[None, self._NC2])
-
-    def call(self, coords_F):
-        coords, F = coords_F
-        #E = tf.linalg.matmul(NRF, self.kernel)
-        #E = tf.reshape(E, shape=(tf.shape(E)[0], 1)) # b,NC2
-        #E = self.activation(E)
-        F = tf.reshape(F, shape=(tf.shape(F)[0], -1))
-        #FE = tf.concat([F, E], axis=1)
-
-        eij_F, r_flat = Projection(self.n_atoms, self._NC2)(coords)
-        #recip_r_flat = 1 / r_flat
-        #norm_recip_r = tf.reduce_sum(recip_r_flat ** 2, axis=1, 
-                #keepdims=True) ** 0.5
-        #eij_E = recip_r_flat / norm_recip_r
-        #eij_E = tf.reshape(eij_E, shape=(tf.shape(eij_E)[0],1,-1)) # b,NC2
-        #eij_FE = tf.concat([eij_F, eij_E], axis=1)
-
-        # where's the pinv??
-        decompFE = tf.einsum('bij, bi -> bj', eij_F, F) # b,3N+1,NC2 b,3N+1 b,NC2
-        decompFE = tf.reshape(decompFE, shape=(tf.shape(decompFE)[0], -1)) # b,NC2
-
-        return decompFE
-
-
 class Decomposition(Layer):
     def __init__(self, n_atoms, _NC2, **kwargs):
         super(Decomposition, self).__init__()
@@ -341,7 +317,7 @@ class Decomposition(Layer):
         coords, F = coords_F
         F = tf.reshape(F, shape=(tf.shape(F)[0], -1))
         eij_F, r_flat = Projection(self.n_atoms, self._NC2)(coords)
-        # where's the pinv??
+        ##wrong! where is pinv?
         decompF = tf.einsum('bij, bi -> bj', eij_F, F) # b,3N,NC2 b,3N b,NC2
         decompF = tf.reshape(decompF, shape=(tf.shape(decompF)[0], -1)) # b,NC2
 
@@ -385,7 +361,7 @@ class E_Recomposition(Layer):
 
         eij_F, r_flat = Projection(self.n_atoms, self._NC2)(coords)
 
-        '''
+
         # adding 1 extra col
         ones = tf.ones_like(r_flat)
         ones = tf.reshape(ones[:,0], shape=(-1, 1))
@@ -393,21 +369,20 @@ class E_Recomposition(Layer):
         norm_r = tf.reduce_sum(r_flat_1 ** 2, axis=1, 
                 keepdims=True) ** 0.5
         eij_E = r_flat_1 / norm_r
-        '''
 
-        #'''
+
+        '''
         recip_r_flat = 1 / r_flat
         norm_recip_r = tf.reduce_sum(recip_r_flat ** 2, axis=1, 
                 keepdims=True) ** 0.5
         eij_E = recip_r_flat / norm_recip_r
         #eij_FE = tf.concat([eij_F, eij_E], axis=1)
-
+        '''
 
         recompE = tf.einsum('bi, bi -> b', eij_E, decompFE) # b,NC2 b,NC2
-        #'''
 
         ##summing decompFE instead
-        #recompE = tf.reduce_sum(decompFE, axis=1, keepdims=True)
+        recompE = tf.reduce_sum(decompFE, axis=1, keepdims=True)
         recompE = tf.reshape(recompE, shape=(tf.shape(coords)[0], 1)) # b,1
 
         return recompE
@@ -443,16 +418,20 @@ class FE_Decomposition(Layer):
         inv_eij = tf.linalg.pinv(eij_FE) # b,NC2+1,3N+1
         qs = tf.linalg.matmul(inv_eij, FE) # b,NC2+1,3N+1 * b,3N+1,1
         qs = tf.reshape(qs, shape=(tf.shape(qs)[0], self._NC2)) # b,NC2+1
-        #qs = qs * norm # remove bias so sum q = E
+        qs = qs * norm # remove bias so sum q = E
 
         return qs
-
 
 class Projection(Layer):
     def __init__(self, n_atoms, _NC2, **kwargs):
         super(Projection, self).__init__()
         self.n_atoms = n_atoms
         self._NC2 = _NC2
+
+    #def compute_output_shape(self, input_shape):
+        #batch_size = input_shape[0]
+        #return (batch_size, self._NC2)
+        #return (batch_size, self.n_atoms, 3)
 
     def call(self, coords):
         a = tf.expand_dims(coords, 2)
@@ -502,112 +481,6 @@ class Projection(Layer):
         eij_F = tf.transpose(eij_F, perm=[1,0,2]) # b,3N,NC2
 
         return eij_F, r_flat
-
-
-class AtomEProjection(Layer):
-    def __init__(self, n_atoms, _NC2, **kwargs):
-        super(AtomEProjection, self).__init__()
-        self.n_atoms = n_atoms
-        self._NC2 = _NC2
-
-    def call(self, coords_qs):
-        coords, qs = coords_qs
-        eij_F, r_flat = Projection(self.n_atoms, self._NC2)(coords)
-        recip_r_flat = 1 / r_flat
-        norm_recip_r = tf.reduce_sum(recip_r_flat ** 2, axis=1, 
-                keepdims=True) ** 0.5
-        eij_E1 = recip_r_flat / norm_recip_r
-        # make eij_E sum to one so that qs sum to E
-        inv_eij = eij_E1 / tf.reduce_sum(eij_E1, axis=1, keepdims=True)
-
-        '''
-        qs = inv_eij * E # don't need to use pinv
-        qs_tri = Triangle(self.n_atoms)(qs)
-        atomEs = tf.reduce_sum(qs_tri, axis=1) / 2
-        Es = tf.reduce_sum(atomEs, axis=1, keepdims=True)
-        # adding 1 extra row of ones
-        zeros = tf.zeros_like(atomEs)
-        zeros = tf.reshape(zeros[:,0], shape=(-1,1))
-        atomEs = tf.concat([atomEs, zeros], axis=1)
-        '''
-
-        # get eij Projection matrix as used for force recomp
-        eij_ = Triangle(self.n_atoms)(inv_eij)
-
-
-
-        # put eij_F in format (batch,3N,NC2), some NC2 will be zeros
-        new_eij_E = []
-        n_atoms = coords.shape.as_list()[1]
-        for i in range(n_atoms):
-            atom_i = eij_[:,i,:]
-            s = []
-            _N = -1
-            count = 0
-            a = [k for k in range(n_atoms) if k != i]
-            for i2 in range(n_atoms):
-                for j2 in range(i2):
-                    _N += 1
-                    if i2 == i:
-                        s.append(atom_i[:,a[count]])
-                        count += 1
-                    elif j2 == i:
-                        s.append(atom_i[:,a[count]])
-                        count += 1
-                    else:
-                        s.append(tf.zeros_like(atom_i[:,0]))
-            s = tf.stack(s)
-            s = tf.transpose(s)
-            new_eij_E.append(s)
-
-
-        eij_E = tf.stack(new_eij_E)
-        eij_E = tf.transpose(eij_E, perm=[1,0,2]) # b,3N,NC2
-
-        '''
-        # adding 1 extra row
-        ones = tf.ones_like(eij_E)
-        ones = tf.reshape(ones[:,0,:], shape=(-1,1,self._NC2))
-        eij_E = tf.concat([eij_E, ones], axis=1)
-        '''
-
-        eij_FE = tf.concat([eij_F, eij_E], axis=1)
-
-        '''
-        F_atomEs = tf.concat([F_reshaped , atomEs], axis=1)
-        F_atomEs = tf.expand_dims(F_atomEs, 2)
-        inv_eij = tf.linalg.pinv(eij_FE) # b,NC2+1,3N+1
-        qs = tf.transpose(tf.linalg.matmul(inv_eij, tf.transpose(F_atomEs))) # b,NC2+1,3N+1 * b,3N+N+1,1
-
-        qs = tf.transpose(qs, perm=[1,0,2])
-        qs = tf.linalg.diag_part(qs) #only choose diags
-        qs = tf.transpose(qs)
-        qs = tf.reshape(qs, shape=(tf.shape(coords)[0], _NC2)) # b,NC2+1
-        '''
-
-        recomp_F_atomEs = tf.einsum('bij, bj -> bi', eij_FE, qs) # b,3N+N+1,NC2 b,NC2 b,N+1
-        #sum_recomp = tf.reduce_sum(recomp_F_atomEs[:,-self.n_atoms-1:], axis=1)
-        sum_recomp = tf.reduce_sum(recomp_F_atomEs[:,-self.n_atoms:], axis=1)
-        E = tf.reshape(sum_recomp, shape=(tf.shape(coords)[0], 1))
-
-        return E 
-
-
-class LearnEij(Layer):
-    def __init__(self, n_atoms, _NC2, **kwargs):
-        super(LearnEij, self).__init__()
-        self.n_atoms = n_atoms
-        self._NC2 = _NC2
-
-    def build(self, input_shape):
-        self.w = self.add_weight(shape=(input_shape[-1], self._NC2),
-                initializer='random_normal', trainable=True,)
-        self.b = self.add_weight(shape=(self._NC2,), 
-                initializer='random_normal', trainable=True,)
-
-
-    def call(self, eij):
-        return tf.matmul(eij, self.w) + self.b
 
 
 class EnergyGradient(Layer):
@@ -735,18 +608,16 @@ class Network(object):
         return network
 
 
-    def get_coord_FE_model(self, molecule, prescale1, training_model=True, 
-            model_file='best_ever_model_0', val_points=50):
+    def get_coord_FE_model(self, molecule, prescale1):
         '''Input coordinates and z_types into model to get NRFS which then 
         are used to predict decompFE, which are then recomposed to give
         Cart Fs and molecular E, both of which could be used in the loss
         function, could weight the E or Fs as required.
         '''
 
-        #val_points = 1
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms*(n_atoms-1)/2)
-        extra_cols = 0 #n_atoms #1 ## !!!!!!!!
+        extra_cols = 1 #n_atoms #1 ## !!!!!!!!
         print('!!!!! extra_cols:', extra_cols)
         atoms = np.array([float(i) for i in molecule.atoms], dtype='float32')
         atoms_ = tf.convert_to_tensor(atoms, dtype=tf.float32)
@@ -762,7 +633,7 @@ class Network(object):
                 atoms_flat.append(ij)
         atoms_flat = tf.convert_to_tensor(atoms_flat, dtype=tf.float32) #_NC2
 
-        #training_model = True
+        training_model = True
         if training_model:
             #for training a model
             get_data = True
@@ -773,7 +644,7 @@ class Network(object):
 
         if training_model == False:
             #for loading a model to use with openmm
-            get_data = True #False #
+            get_data = False #True #
             load_first = False
             fit = False
             load_weights = True
@@ -865,13 +736,14 @@ class Network(object):
             # get indices for bonded and non-bonded pairs here, 
             # use one structure to get this info to apply to all
             print('\nGet indices for bonded, non-bonded and combined pairs')
+            cutoff = 1.8
             r = molecule.mat_r[0]
             if extra_cols == 1:
                 r = np.concatenate((r, [10]), axis=0) #make last r greater than bond cutoff
             print('r', r)
-            bonded_indices = [i for i in np.where(r < 2)[0]]
+            bonded_indices = [i for i in np.where(r < cutoff)[0]]
             print('b_inx', bonded_indices)
-            nb_indices = [i for i in np.where(r >= 2)[0]]
+            nb_indices = [i for i in np.where(r >= cutoff)[0]]
             print('nb_inx', nb_indices)
             if _NC2 in bonded_indices:
                 bonded_indices2 = bonded_indices.copy()[-1]
@@ -905,7 +777,7 @@ class Network(object):
                     (prescale1[1] - prescale1[0]) + prescale1[0])
 
 
-            #val_points = 50
+            val_points = 50
             print('val points: {}'.format(val_points))
             ###get validation from within training
             train2, val = Molecule.make_train_test(train_output_E.flatten(), 
@@ -961,7 +833,7 @@ class Network(object):
 
 
         file_name='best_model'
-        monitor_loss= 'val_loss' #'loss' # 
+        monitor_loss='val_loss' #'loss' #
         set_patience=1000
         restore_best_weights = True
         print('monitor_loss:', monitor_loss)
@@ -986,7 +858,7 @@ class Network(object):
         grad_loss = [1000]
         qF_loss = [0]
         qE_loss = [0]
-        qFE_loss = [0]
+        qFE_loss = [100]
         E_loss = [1]
         q_loss = [1]
         force_diff_loss = [0]
@@ -1006,6 +878,7 @@ class Network(object):
             #if l > 0:
                 #model = concatenate([model2[3], NRF_layer])
             coords_layer = Input(shape=(n_atoms,3), name='coords_layer')
+            eij_F, r_flat = Projection(n_atoms, _NC2)(coords_layer)
 
             proj_layer, r_layer = Projection(n_atoms, _NC2)(coords_layer)
 
@@ -1015,6 +888,7 @@ class Network(object):
 
             one_hot_layer = OneHot(atoms_int, name='one_hot_layer')(coords_layer)
 
+            #'''
             r_cutoff1 = 10
             r_cutoff = tf.constant(r_cutoff1, dtype=tf.float32)
             n_features = int(r_cutoff1/0.1)
@@ -1023,18 +897,17 @@ class Network(object):
                     name='RBF_layer')(coords_layer)
             #embedding_layer = tf.keras.layers.Embedding(100, n_atoms)(NRF_layer) 
 
-            '''
-            for n in range(3):
+            for n in range(1):
 
-                #if n == 0:
-                    #split_NRF_layer = SplitNRF(bonded_indices2, nb_indices2,
-                            #name='split_NRF_layer')(NRF_layer)
-                #else:
-                    #split_NRF_layer = SplitNRF(bonded_indices, nb_indices,
-                            #name='split_NRF_layer')(NRF_layer)
+                if n == 0:
+                    split_NRF_layer = SplitNRF(_NC2, bonded_indices2, nb_indices2,
+                            name='split_NRF_layer')([NRF_layer,r_flat])
+                else:
+                    split_NRF_layer = SplitNRF(_NC2, bonded_indices, nb_indices,
+                            name='split_NRF_layer')([NRF_layer, r_flat])
 
-                NRF_layer2 = TransformNRF(n_atoms, _NC2, 
-                        name='NRF_layer2_{}'.format(n))(NRF_layer)
+                #NRF_layer2 = TransformNRF(n_atoms, _NC2, 
+                        #name='NRF_layer2_{}'.format(n))(NRF_layer)
                 #trans_layer1 = TransposeQ(_NC2, 
                         #name='trans_layer1_{}'.format(n))(RBF_layer)
                 #trans_layer2 = TransposeQ(_NC2, 
@@ -1044,33 +917,34 @@ class Network(object):
                 #NRF_splits = tf.split(split_NRF_layer, 22, axis=1, 
                         #name='NRF_splits')
 
+
                 net_layer1A = Dense(units=128, activation='silu', 
-                        name='net_layer1A_{}'.format(n))(NRF_layer2)
-                        #(one_hot_layer)#(split_NRF_layer[0])
-                #net_layer1B = Dense(units=128, activation='silu', 
-                        #name='net_layer1B_{}'.format(n))(net_layer1A)
-                #net_layer1C = Dense(units=128, activation='silu', 
-                        #name='net_layer1C_{}'.format(n))(net_layer1B)
-                net_layer1D = Dense(units=_NC2,#100, 
+                        name='net_layer1A_{}'.format(n))(split_NRF_layer[0])
+                        #(NRF_layer2)#(one_hot_layer)#
+                net_layer1B = Dense(units=128, activation='silu', 
+                        name='net_layer1B_{}'.format(n))(net_layer1A)
+                net_layer1C = Dense(units=128, activation='silu', 
+                        name='net_layer1C_{}'.format(n))(net_layer1B)
+                net_layer1D = Dense(units=len(bonded_indices),#_NC2,#100, 
                         activation='silu', 
-                        name='net_layer1D_{}'.format(n))(net_layer1A)
+                        name='net_layer1D_{}'.format(n))(net_layer1C)
 
                 net_layer2A = Dense(units=128, activation='silu', 
-                        name='net_layer2A_{}'.format(n))(RBF_layer)#(split_NRF_layer[1])#
-                #net_layer2B = Dense(units=128, activation='silu', 
-                        #name='net_layer2B_{}'.format(n))(net_layer2A)
-                #net_layer2C = Dense(units=128, activation='silu', 
-                        #name='net_layer2C_{}'.format(n))(net_layer2B)
-                net_layer2D = Dense(units=_NC2,#100, 
+                        name='net_layer2A_{}'.format(n))(split_NRF_layer[1])#(RBF_layer)
+                net_layer2B = Dense(units=128, activation='silu', 
+                        name='net_layer2B_{}'.format(n))(net_layer2A)
+                net_layer2C = Dense(units=128, activation='silu', 
+                        name='net_layer2C_{}'.format(n))(net_layer2B)
+                net_layer2D = Dense(units=len(nb_indices),#_NC2,#100, 
                         activation='silu', 
-                        name='net_layer2D_{}'.format(n))(net_layer2A)
+                        name='net_layer2D_{}'.format(n))(net_layer2C)
 
-                #combineQ_layer = CombineQ(all_indices, 
-                        #name='combineQ_layer')([net_layer1D, net_layer2D])
+                combineQ_layer = CombineQ(all_indices, 
+                        name='combineQ_layer')([net_layer1D, net_layer2D])
 
-                conv_layer = tf.keras.layers.multiply(
-                        [net_layer1D, net_layer2D], 
-                        name='conv_layer_{}'.format(n))
+                #conv_layer = tf.keras.layers.multiply(
+                        #[net_layer1D, net_layer2D], 
+                        #name='conv_layer_{}'.format(n))
 
                 #trans_layer3 = TransposeQ(_NC2, 
                         #name='trans_layer3_{}'.format(n))(conv_layer)
@@ -1078,60 +952,43 @@ class Network(object):
                 #net_layer3A = Dense(units=_NC2, activation='silu', 
                         #name='net_layer3A_{}'.format(n))(conv_layer)
 
-                sum_layer1 = SumQ(_NC2, 
-                        name='sum_layer1_{}'.format(n))(conv_layer)
-                sum_layer2 = SumQ(_NC2, 
-                        name='sum_layer2_{}'.format(n))(sum_layer1)
+                #sum_layer1 = SumQ(_NC2, 
+                        #name='sum_layer1_{}'.format(n))(conv_layer)
+                #sum_layer2 = SumQ(_NC2, 
+                        #name='sum_layer2_{}'.format(n))(sum_layer1)
 
-                NRF_layer = sum_layer2 #combineQ_layer
+                NRF_layer = combineQ_layer
 
                 #NRF_layer = tf.keras.layers.add([NRF_layer, sum_layer2], 
                     #name='NRF_layer_{}'.format(n))
 
                 #one_hot_layer = tf.keras.layers.add([one_hot_layer, sum_layer2], 
                     #name='one_hot_layer_{}'.format(n))
-            '''
+            #'''
 
-            '''
-            net_layer1A = Dense(units=1000, activation='silu', 
-                    name='net_layer1A')(NRF_layer)
-            #net_layer1B = Dense(units=_NC2+extra_cols, 
-                    #activation='silu', 
-                    #name='net_layer1B')(net_layer1A)
 
-            net_layer4A = Dense(units=_NC2+extra_cols, activation='silu', 
-                    name='net_layer4A')(net_layer1A)#(NRF_layer)#(one_hot_layer)
+
+
+            net_layer4A = NRF_layer #Dense(units=_NC2+extra_cols, activation='silu', 
+                    #name='net_layer4A')(NRF_layer)#(one_hot_layer)
             #net_layer4B = Dense(units=_NC2, activation='sigmoid', 
                     #name='net_layer4B')(net_layer4A)
+
+
             '''
-
-
-            #'''
-            #NRF_layer2 = TransformNRF(n_atoms, _NC2, 
-                    #name='NRF_layer2')(NRF_layer)
-            net_layer1A = Dense(units=1000,#728, 
-                    activation='silu', 
-                    name='net_layer1A')(NRF_layer)
-            #net_layer1B = Dense(units=128, activation='silu', 
-                    #name='net_layer1B')(net_layer1A)
-            #net_layer1C = Dense(units=128, activation='silu', 
-                    #name='net_layer1C')(net_layer1B)
-            #net_layer1D = Dense(units=64, activation='silu', 
-                    #name='net_layer1D')(net_layer1C)
-            net_layer1E = Dense(units=_NC2+extra_cols, activation='silu', 
-                    name='net_layer1E')(net_layer1A)
-
-            unscale_qFE_layer = UnscaleQ(_NC2+extra_cols, max_matFE)(
-                    net_layer1E)#(NRF_layer) #(sum_layer1) #
-            #E_layer = AtomEProjection(n_atoms, _NC2)(
-                    #[coords_layer, unscale_qFE_layer])
-            E_layer = E_Recomposition(n_atoms, _NC2)(
-                    [coords_layer, unscale_qFE_layer])
-            scaleE_layer = UnscaleE(prescale)(E_layer)
-            dE_dx = EnergyGradient(n_atoms, _NC2)(
-                    [scaleE_layer, coords_layer])
-
-            #'''
+            NRF_layer2 = TransformNRF(n_atoms, _NC2, 
+                    name='NRF_layer2')(NRF_layer)
+            net_layer1A = Dense(units=728, activation='silu', 
+                    name='net_layer1A')(NRF_layer2)
+            net_layer1B = Dense(units=128, activation='silu', 
+                    name='net_layer1B')(net_layer1A)
+            net_layer1C = Dense(units=128, activation='silu', 
+                    name='net_layer1C')(net_layer1B)
+            net_layer1D = Dense(units=64, activation='silu', 
+                    name='net_layer1D')(net_layer1C)
+            net_layer1E = Dense(units=_NC2, activation='silu', 
+                    name='net_layer1E')(net_layer1D)
+            '''
 
 
             '''
@@ -1189,49 +1046,22 @@ class Network(object):
                     input_dim=_NC2+extra_cols, name='lin_layer')(qF_layer)
             '''
 
-            '''
-            decompFE = NRF_layer
-            for n in range(2):
-                decompFE = Dense(units=_NC2+extra_cols, 
-                        activation='silu')(decompFE)
-                net_layer1B = Dense(units=1000, 
-                        activation='silu')(decompFE)
-                net_layer1C = Dense(units=_NC2+extra_cols, activation='silu')(
-                        net_layer1B)
-                unscale_qFE_layer = UnscaleQ(_NC2+extra_cols, max_matFE)(
-                        net_layer1C)#(NRF_layer) #(sum_layer1) #
-                #decompFE = unscale_qFE_layer
-                E_layer = E_Recomposition(n_atoms, _NC2)(
-                        [coords_layer, unscale_qFE_layer])
-                scaleE_layer = UnscaleE(prescale)(E_layer)
-                dE_dx = EnergyGradient(n_atoms, _NC2)(
-                        [scaleE_layer, coords_layer])
-                Q = FE_Decomposition(n_atoms, _NC2+extra_cols)(
-                        [coords_layer, dE_dx, E_layer])
-                decompFE2 = ScaleQ(_NC2+extra_cols, max_matFE)(Q)
-                decompFE = tf.keras.layers.add([decompFE, decompFE2])
-            '''
-
-            '''
-            scale_qFE_layer = ScaleQ(_NC2+extra_cols, max_matFE)(Q)
-            net_layer3A = Dense(units=1000, activation='silu')(
-                    scale_qFE_layer)
-            scaled_decompFE = Dense(units=_NC2+extra_cols, 
-                    activation='silu')(net_layer3A)
-            decompFE = UnscaleQ(_NC2+extra_cols, max_matFE)(
-                    scaled_decompFE)
-
-            E_layer = E_Recomposition(n_atoms, _NC2)(
-                    [coords_layer, decompFE])
-            scaleE_layer = UnscaleE(prescale)(E_layer)
-            dE_dx = EnergyGradient(n_atoms, _NC2)(
-                    [scaleE_layer, coords_layer])
+            unscale_qFE_layer = UnscaleQ(_NC2, max_matFE,#_all, 
+                    name='unscale_qF_layer')(net_layer4A)#(NRF_layer) #(sum_layer1) #
+            #F_layer = Recomposition(n_atoms, _NC2,
+                    #name='F_layer')([coords_layer, unscale_qF_layer])
+            #qFE_layer = FE_Decomposition(n_atoms, _NC2, activation='silu',
+                    #name='qFE_layer')([coords_layer, F_layer])
+            #scale_qFE_layer = ScaleQ(_NC2, max_matF, 
+                    #name='scale_qFE_layer')(qFE_layer)
+            E_layer = E_Recomposition(n_atoms, _NC2,
+                    name='qFE_layer')([coords_layer, unscale_qFE_layer])
+            scaleE_layer = UnscaleE(prescale, 
+                    name='unscaleE_layer')(E_layer)
+            dE_dx = EnergyGradient(n_atoms, _NC2, 
+                    name='dE_dx')([scaleE_layer, coords_layer])
             Q = FE_Decomposition(n_atoms, _NC2+extra_cols)(
                     [coords_layer, dE_dx, E_layer])
-
-            '''
-            n=0
-
 
             rlrop = ReduceLROnPlateau(monitor=monitor_loss, factor=0.5, 
                     patience=50, min_lr=1e-4)
@@ -1245,58 +1075,35 @@ class Network(object):
                     inputs=[coords_layer], 
                     outputs=[
                         dE_dx,
-                        #Q,
                         unscale_qFE_layer,
                         scaleE_layer,
-                        #decompFE,
-
+                        Q,
                         ], 
                     )
 
-            #'''
+
             if l == 0:
                 model.compile(
                         loss={
                             'energy_gradient': 'mse',
                             'unscale_q': 'mse',
                             'unscale_e': 'mse',
-                            #'fe__decomposition': 'mse',
+                            'fe__decomposition': 'mse',
                             },
                         loss_weights={
                             'energy_gradient': grad_loss[l],
-                            'unscale_q': q_loss[l],
+                            'unscale_q': qFE_loss[l],
                             'unscale_e': E_loss[l],
-                            #'fe__decomposition': qFE_loss[l],
+                            'fe__decomposition': q_loss[l],
                             },
                         #optimizer='adam',
                         optimizer=optimizer,
                         )
-            #'''
-
-            '''
-            if l == 0:
-                model.compile(
-                        loss={
-                            'energy_gradient_{}'.format(n+1): 'mse',
-                            'unscale_q_{}'.format(n+1): 'mse',
-                            'unscale_e_{}'.format(n+1): 'mse',
-                            #'fe__decomposition_{}'.format(n+1): 'mse',
-                            },
-                        loss_weights={
-                            'energy_gradient_{}'.format(n+1): grad_loss[l],
-                            'unscale_q_{}'.format(n+1): q_loss[l],
-                            'unscale_e_{}'.format(n+1): E_loss[l],
-                            #'fe__decomposition_{}'.format(n+1): qFE_loss[l],
-                            },
-                        #optimizer='adam',
-                        optimizer=optimizer,
-                        )
-            '''
 
             model.summary()
             print(model(train2_input_coords[0:2]))
 
-            #print('initial learning rate:', K.eval(model.optimizer.lr))
+            print('initial learning rate:', K.eval(model.optimizer.lr))
 
             #load_first = True
             if load_first and l != 0:
@@ -1318,14 +1125,14 @@ class Network(object):
                             train2_forces, 
                             train2_output_matFE, 
                             train2_output_E_postscale, 
-                            #train2_output_matFE, 
+                            train2_output_matFE, 
                             ],
                         validation_data=(val_input_coords, 
                             [
                                 val_forces, 
                                 val_output_matFE, 
                                 val_output_E_postscale, 
-                                #val_output_matFE, 
+                                val_output_matFE, 
                                 ]),
                         epochs=1000000, 
                         verbose=2,
@@ -1413,7 +1220,7 @@ class Network(object):
         #load_weights = False
         if load_weights:
             #model_file='best_model1'#'../model/best_ever_model_6'
-            #model_file='best_ever_model_0'#'../model/best_ever_model_6'
+            model_file='best_ever_model_0'#'../model/best_ever_model_6'
             #model_file='best_model'#'../model/best_ever_model_6'
             print('load_weights', load_weights, model_file)
             model.load_weights(model_file)
@@ -1425,7 +1232,7 @@ class Network(object):
                         train_forces, 
                         train_output_matFE,
                         train_output_E_postscale,
-                        #train_output_matFE,
+                        train_output_matFE,
                         ], verbose=0)
             print(l, len(train_input_coords), 'train model error: ', 
                     best_error)

@@ -7,7 +7,7 @@ This module is used to store information required to predict forces:
     Energy units are in kcal/mol
     Force units are in kcal/(mol Ang)
     Z units are in units of elementary charge (e)
-    Addtional variables added are:
+    Additional variables added are:
         NC2 pairwise forces shaped (Nstructures, NC2)
 
 '''
@@ -30,6 +30,11 @@ class Molecule(object):
                 len(self.atoms), len(self.coords)))
 
     def get_ZCFE(self, other):
+        '''
+        For a given set of atom numbers, coords, forces and energies
+        read in, populate the Molecule object which is used to calculate
+        NRFs, decompFE, etc.
+        '''
         self.filenames = other.filenames
         self.atoms = other.atoms
         if len(other.coords) > 0:
@@ -48,7 +53,7 @@ class Molecule(object):
         '''
 
     def check_force_conservation(self):
-        ''' Ensure that forces in each structure translationally and 
+        '''Ensure that forces in each structure translationally and 
         rotationally sum to zero (energy is conserved) i.e. translations
         and rotations are invariant. '''
         unconserved = []
@@ -89,7 +94,8 @@ class Molecule(object):
 
 
     def permutation_sort(atoms, ref_coords, ref_groups, coords):
-        '''As per Neil's PairPermSort, reorder atoms based on reference
+        '''Not used or finished, 
+        As per Neil's PairPermSort, reorder atoms based on reference
         structure.
         1. Choose the correct atom order, this is based on (a) nuclear charge
         (b) largest NRE. This ordering will prioritise fitting of atoms to
@@ -194,6 +200,10 @@ class Molecule(object):
 
 
     def find_bonded_atoms(atoms, coords):
+        '''
+        Get an adjacency matrix according to a hard-coded cutoff of 
+        1.6 Angstrom.
+        '''
         n_atoms = len(atoms)
         A = np.zeros((n_atoms, n_atoms))
         for i in range(n_atoms):
@@ -311,6 +321,10 @@ class Molecule(object):
         return all_sorted_list, all_resorted_list
 
     def remove_variants(self, unconserved):
+        '''
+        If a structure needs to be removed from the entries, where
+        unconserved is the index number that is to be removed.
+        '''
         s = unconserved
         #for s in unconserved:
         self.coords = np.delete(self.coords, s, axis=0)
@@ -365,8 +379,11 @@ class Molecule(object):
 
 
     def sort_by_energy(self):
-        self.energies = np.array(self.energies)
-        self.sorted_i = np.argsort(self.energies)
+        '''
+        sort all molecules from low to high energy strucures.
+        '''
+        #self.energies = np.array(self.energies)
+        self.sorted_i = np.argsort(self.energies.flatten())
         self.energies = self.energies[self.sorted_i]
         self.coords = self.order_array(self.coords, self.sorted_i)
         self.forces = self.order_array(self.forces, self.sorted_i)

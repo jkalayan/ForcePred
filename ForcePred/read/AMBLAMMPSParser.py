@@ -14,7 +14,8 @@ from ..write.Writer import Writer
 
 class AMBLAMMPSParser(object):
     '''
-    Ensure unwrapped atom coordinates 9xu,yu,zu are used from 
+    Use MDAnalysis to read in AMber topolgy and LAMMPS trajectories.
+    Ensure unwrapped atom coordinates xu,yu,zu are used from 
     LAMMPS MD simulations.
     '''
 

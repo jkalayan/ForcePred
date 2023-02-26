@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-This module is for running MM simulations using OpenMM.
+This module is for running MD simulations using OpenMM.
 '''
 
 from ..read.Molecule import Molecule
@@ -29,6 +29,8 @@ import sys
 
 class OpenMM(object):
     '''
+    This class is used to run MD simulations with predicted
+    forces from a machine-learned potential trained using keras/tensorflow.
     '''
     def __init__(self):
         self.coords = []
@@ -36,16 +38,32 @@ class OpenMM(object):
         self.velocities = []
 
 
-    def get_system(masses, pdb_file):
-        '''setup system for MD with OpenMM'''
+    def get_system(masses, pdb_file, dt, gaff=False, mlff=True, mlmm=False):
+        '''setup system for MD with OpenMM
 
-        gaff = False
-        mlff = True
-        mlmm = False
+        Vars:
+
+        masses: list of masses for each atom in molecule.
+
+        pdb_file: pdb file of molecule structure needed when
+        mlmm or mlff are True 
+
+        gaff: If True, then use Amber input coords and topology for system
+        parameters.
+
+        mlff: If True, then use a pdb and list of masses to create system, 
+        
+        '''
+
+
+        #gaff = False
+        #mlff = True
+        #mlmm = False
         force = None
 
         if mlmm:
-            pdb_file='../../revised_data/3md.rst.pdb'
+            #pdb_file='../../revised_data/3md.rst.pdb'
+            pdb_file='../revised_data/3md.rst.pdb'
             pdb = PDBFile(pdb_file)
             '''
             pdb = PDBFile(pdb_file)
@@ -79,8 +97,8 @@ class OpenMM(object):
                     nonbondedMethod=PME, nonbondedCutoff=0.8*nanometer)
             '''
 
-            prmtop = AmberPrmtopFile('../../revised_data/molecules.prmtop')
-            inpcrd = AmberInpcrdFile('../../revised_data/molecules.inpcrd')
+            prmtop = AmberPrmtopFile('../revised_data/molecules.prmtop')
+            inpcrd = AmberInpcrdFile('../revised_data/molecules.inpcrd')
             mm_system = prmtop.createSystem()
             print(mm_system.getNumParticles())
 
@@ -177,7 +195,8 @@ class OpenMM(object):
 
         if mlff:
             #intial coords need to be in pdb format or amber, gromacs, charmm
-            pdb_file='../../revised_data/molecule.pdb'
+            pdb_file='../revised_data/molecule.pdb'
+            #pdb_file='molecule.pdb'
             pdb = PDBFile(pdb_file)
             n_atoms = len(pdb.getPositions())
             #create a system of n_atoms with zero intial forces
@@ -236,7 +255,7 @@ class OpenMM(object):
         ## setup simulation conditions
         ts = (0.5*femtoseconds).in_units_of(picoseconds) #1 ps == 1e3 fs
         coupling = 1 #50 #2 and 100K, 50 and 300K 
-        temperature = 500 #300 #500 #300
+        temperature = 300 #300 #500 #300
         print('temperature {}K coupling {} ps^-1'.format(temperature, 
             coupling))
 
@@ -297,7 +316,7 @@ class OpenMM(object):
             simulation.context.setPositions(inpcrd.positions)
         #simulation.minimizeEnergy()
         #simulation.reporters.append(PDBReporter('openmm.pdb', 1))
-        simulation.reporters.append(StateDataReporter('openmm.csv', 4,
+        simulation.reporters.append(StateDataReporter('openmm.csv', dt, #10000,
                 #1000, #
                 step=True, potentialEnergy=True, kineticEnergy=True, 
                 temperature=True))
@@ -315,7 +334,8 @@ class OpenMM(object):
                 kilocalories_per_mole/angstrom) #in kcal/mol/A
         #print('init_forces', init_forces[:n_atoms_model])
 
-        simulation.reporters.append(DCDReporter('o-trajectory.dcd', 4))
+        simulation.reporters.append(DCDReporter('o-trajectory.dcd', dt #10000
+                ))
 
         return system, simulation, force, integrator, \
                 init_positions, init_forces
@@ -323,10 +343,10 @@ class OpenMM(object):
 
     def run_md(system, simulation, md, force, integrator, temperature, 
             network, model, nsteps, saved_steps, init_positions, 
-            init_forces, prescale):
+            init_forces, prescale, mlmm=False, mlff=True):
         '''Run MD with OpenMM for nsteps'''
 
-        mlmm = False
+        #mlmm = False
         NVT = False
         if NVT:
             #set temperature for integrator
@@ -360,7 +380,7 @@ class OpenMM(object):
             f2 = open('openmm-forces.txt', 'a') 
             f3 = open('openmm-velocities.txt', 'a') 
             f4 = open('openmm-delta_energies.txt', 'a')
-            f5 = open('openmm-f-curl.txt', 'a')
+            #f5 = open('openmm-f-curl.txt', 'a')
             f6 = open('openmm-mm-forces.txt', 'a')
 
             #print(i)
@@ -371,7 +391,7 @@ class OpenMM(object):
             system, simulation, force, curl, positions, pred_forces, \
                     mm_forces = OpenMM.get_forces(i, system, simulation, 
                     force, md.atoms, init_forces, init_positions, network, 
-                    model, prescale, pairs_dict)
+                    model, prescale, pairs_dict, mlff, mlmm)
             velocities = simulation.context.getState(
                     getVelocities=True).getVelocities(
                     asNumpy=True).in_units_of(angstrom/picosecond) #in Ang/ps
@@ -397,7 +417,7 @@ class OpenMM(object):
                 np.savetxt(f2, forces[:n_atoms_model])
                 np.savetxt(f3, velocities[:n_atoms_model])
                 f4.write('{}\n'.format(dE))
-                f5.write('{}\n'.format(curl))
+                #f5.write('{}\n'.format(curl))
                 md.coords.append([positions[:n_atoms_model]]/angstrom)
                 md.forces.append([pred_forces[:n_atoms_model]]/
                         kilocalories_per_mole/angstrom)
@@ -419,14 +439,15 @@ class OpenMM(object):
             f2.close()
             f3.close()
             f4.close()
-            f5.close()
+            #f5.close()
             f6.close()
         
         return system, simulation, md
 
 
     def get_forces(time, system, simulation, force, atoms, init_forces, 
-            init_coords, network, model, prescale, pairs_dict):
+            init_coords, network, model, prescale, pairs_dict, 
+            mlff=True, mlmm=False):
         '''Run MD for one step, using predicted forces'''
 
         n_atoms_model = len(atoms)
@@ -435,8 +456,8 @@ class OpenMM(object):
                 getPositions=True).getPositions(
                 asNumpy=True).in_units_of(angstrom) #in angstrom
 
-        mlff = True
-        mlmm = False
+        #mlff = True
+        #mlmm = False
         equiv_atoms = False
         conservation = False
         from_FE = True
@@ -456,7 +477,7 @@ class OpenMM(object):
             ##predict forces here
             if from_FE:
                 pred_forces, curl = OpenMM.predict_force_internal_FE(
-                        positions[:n_atoms_model]/angstrom, model)
+                        positions[:n_atoms_model]/angstrom, atoms, model)
                 #pred_forces, curl = OpenMM.predict_force_from_FE(
                         #positions/angstrom, network, model, prescale)
                 #pred_forces2 = OpenMM.predict_force(positions, 
@@ -517,7 +538,10 @@ class OpenMM(object):
 
 
     def predict_force(positions, network, model, equiv_atoms, pairs_dict):
-        '''Use NN model to predict forces of current molecule geom'''
+        '''
+        Not used anymore, was used for older model of force prediction
+        directly from ANN.
+        '''
         mat_NRF = Network.get_NRF_input([positions], network.atoms, 
                 network.n_atoms, network._NC2)
         #print('nrf', mat_NRF)
@@ -559,6 +583,9 @@ class OpenMM(object):
         return recomp_forces
 
     def predict_scaled_force(positions, network, model):
+        '''
+        not used anymore, for old ML model when forces directly predicted
+        '''
         forces = None
         molecule = None
         dr = 0.001
@@ -568,6 +595,9 @@ class OpenMM(object):
         return scaled_F, curl
 
     def predict_force_from_FE(positions, network, model, prescale):
+        '''
+        not used anymore, for old ML model when forces directly predicted
+        '''
         molecule = None
         dr = 0.001
         bias_type = '1/r'
@@ -577,13 +607,16 @@ class OpenMM(object):
                 network.scale_F, model, dr, bias_type, molecule, prescale)
         return scaled_F, curl
 
-    def predict_force_internal_FE(positions, model):
-        '''forces are from gradient of energy'''
-        prediction = model.predict(positions.reshape(1,-1,3))
+    def predict_force_internal_FE(positions, atoms, model):
+        '''Currently used, take current atom positions and predict
+        forces from gradient of energy'''
+        prediction = model.predict([positions.reshape(1,-1,3), 
+                atoms.reshape(1,-1)])
         forces = prediction[0]#[2]
         return forces, None
 
     def translate_coords(init_coords, coords, atoms):
+        '''translate molecule center-of-mass to centre of box'''
         n_atoms = len(atoms)
         masses = np.array([Converter._ZM[a] for a in atoms])
         _PA, _MI, com = Converter.get_principal_axes(coords, masses)
@@ -598,9 +631,11 @@ class OpenMM(object):
 
 
     def check_invariance(coords, forces):
-        ''' Ensure that forces in each structure translationally and 
+        ''' 
+        Ensure that forces in each structure translationally and 
         rotationally sum to zero (energy is conserved) i.e. translations
-        and rotations are invariant. '''
+        and rotations are invariant. 
+        '''
         #translations
         translations = []
         trans_sum = np.sum(forces,axis=0) #sum columns

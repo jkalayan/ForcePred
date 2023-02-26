@@ -38,6 +38,11 @@ def run_force_pred(input_files='input_files',
         atom_file='atom_file', coord_files='coord_files',
         force_files='force_files', energy_files='energy_files',
         charge_files='charge_files', list_files='list_files'):
+    '''
+    This script is used to generate molecular conformations about
+    a list of thetas. A classical MD simulation (no ML here) of a molecule
+    with the force constant 
+    '''
 
     prescale = 0
     startTime = datetime.now()
@@ -162,10 +167,9 @@ def run_force_pred(input_files='input_files',
 def main():
 
     try:
-        usage = 'runForcePred_openmm.py [-h]'
-        parser = argparse.ArgumentParser(description='Program for reading '\
-                'in molecule forces, coordinates and energies for '\
-                'force prediction.', usage=usage, 
+        usage = 'runForcePred_openmm_classical.py [-h]'
+        parser = argparse.ArgumentParser(description='Script for running'\
+                ' classical MD simulation using OpenMM toolkit.', usage=usage, 
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         group = parser.add_argument_group('Options')
         group = parser.add_argument('-i', '--input_files', nargs='+', 

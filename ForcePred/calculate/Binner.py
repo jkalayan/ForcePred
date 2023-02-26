@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-This module is for binning variables against energy to see how well
+This module is used for binning variables against energy to see how well
 sampled configurations are.
 '''
 
@@ -14,6 +14,9 @@ import matplotlib.pyplot as plt
 
 class Binner(object):
     '''
+    This class is used to calculate bond properties, such as angles,
+    dihedrals, etc. And the bin this data into a histogram.
+    There are also some functions to calculate errors.
     '''
  
     def __init__(self):
@@ -29,6 +32,11 @@ class Binner(object):
         return ('\nN structures: %s,' % (len(self.coords)))
 
     def get_bond_pop(self, coords, bonds):
+        '''
+        For a given set of 3D coordinates and a list of atom pair indices,
+        find the bond length between each atom pair. Save this in an array 
+        of N structures * N pairs
+        '''
         for i in range(len(coords)):
             for bond in bonds:
                 bond = np.array(bond)#-1 #index correctly
@@ -40,8 +48,12 @@ class Binner(object):
         self.rs = np.array(self.rs).reshape(-1,len(bonds))
 
     def get_angle_pop(self, coords, angles):
-        '''angles is a list of lists containing atom indices involved 
-        in angles of interest'''
+        '''
+        For a given set of 3D coords and 3 atoms in the molecule, 
+        calculate angles. Output shape = N structures * N angles
+        Angles is a list of lists containing atom indices involved 
+        in angles of interest
+        '''
         self.angles = np.array(angles)
         for i in range(len(coords)):
             for angle in angles:
@@ -51,8 +63,11 @@ class Binner(object):
         self.thetas = np.array(self.thetas).reshape(-1,len(angles))
 
     def get_dih_pop(self, coords, dihs):
-        ''' dihs is a list of lists. Each list is of the atom indices
-        involved in the dihedral of interest. '''
+        '''
+        as with bonds and angles but here for dihedrals.
+        dihs is a list of lists. Each list is of the atom indices
+        involved in the dihedral of interest. 
+        '''
         self.dihs = np.array(dihs)
         for i in range(len(coords)):
             for dih in dihs:
@@ -66,6 +81,9 @@ class Binner(object):
 
 
     def get_angles(coords, angle):
+        '''
+        Calculate the angle between three 3D coordinates.
+        '''
         v1 = coords[angle[0]] - coords[angle[1]]
         v2 = coords[angle[2]] - coords[angle[1]]
         r1 = np.linalg.norm(v1)
@@ -75,6 +93,9 @@ class Binner(object):
         return np.degrees(angle)
 
     def get_dih_angles(coords, dih):
+        '''
+        Calculate the dihedral angle.
+        '''
         #get normalised vectors
         norms = []
         for i in range(len(dih)-1):
@@ -94,6 +115,9 @@ class Binner(object):
         return round(phi, 2)
 
     def get_conf(phi):
+        '''
+        Find the conformer based on what the dihedral angle value is.
+        '''
         if phi >= 120 or phi < -120:
             conf = 't'
         if phi >= 0 and phi < 120:
@@ -117,7 +141,7 @@ class Binner(object):
         return bin_edges, hist
 
     def get_error(all_actual, all_prediction):
-        '''Get one RMS and one MAE for array values'''
+        '''Get total errors for array values.'''
         _N = np.size(all_actual)
         mae = 0
         rms = 0
@@ -134,7 +158,7 @@ class Binner(object):
 
 
     def get_each_error(actual, prediction):
-        '''Get RMS and MAE for each array'''
+        '''Get error for each array'''
         diff = prediction - actual
         mae = abs(diff)
         rms = diff ** 2
@@ -153,6 +177,7 @@ class Binner(object):
             rms[i] = diff ** 2
 
     def get_hist(values, n_bins):
+        '''Put values into a histogram based on n_bins'''
         hist, bin_edges = np.histogram(values, n_bins, density=True)
         bin_edges = bin_edges[range(1, bin_edges.shape[0])]
         return bin_edges, hist

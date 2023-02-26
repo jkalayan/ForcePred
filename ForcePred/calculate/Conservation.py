@@ -2,10 +2,11 @@
 
 '''
 This module is for getting forces that conserve energy during MM.
+It's no longer used as we get forces directly from the negative 
+gradient of the energy.
 '''
 
 import numpy as np
-#from keras.layers import Input, Dense, concatenate, Layer, initializers, Add  
 from keras.models import load_model                                   
 #from keras.models import Model, load_model                                   
 #from keras.callbacks import ModelCheckpoint, EarlyStopping

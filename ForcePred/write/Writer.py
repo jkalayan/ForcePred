@@ -14,6 +14,13 @@ class Writer(object):
     '''
 
     def write_xyz(coords, atoms, filename, open_type, i=False):
+        '''
+        For a given set of structure 3D coords and the atom
+        associated numbers, output xyz format file called filename.
+        Either write a new file (open_type='w') or append to
+        an existing file (open_type='a') and chose the entry number
+        with i=number
+        '''
         xyz_file = open(filename, open_type)
         for molecule in range(len(coords)):
             count = molecule
@@ -29,13 +36,21 @@ class Writer(object):
         xyz_file.close()
 
     def write_gaus_cart(coords, atoms, method_type, filename):
+        '''
+        For a set of 3D coords and associated atom numbers write out
+        a Gaussian input file called filename, the calculation method
+        is somewhat hard-coded, so change below if needed.
+        '''
         symbols = [Converter._ZSymbol[atom] for atom in atoms]
         gaus_cart_file = open('{}.com'.format(filename), 'w')
         for molecule in range(len(coords)):
             if molecule != 0:
                 gaus_cart_file.write('--Link1--\n')
             chkpoint = '%Chk={}.chk'.format(filename)
-            method = '# B3LYP/6-31+G(d) {}'.format(method_type)
+            #method = '# B3LYP/6-31+G(d) {}'.format(method_type)
+            method = '# PBEPBE/Def2SVP FORCE POP=MK '\
+                    'INTEGRAL=(GRID=ULTRAFINE) '\
+                    'SCF=(MaxCycle=512)'
             title = '{} calculate {} {}'.format(molecule, method_type, 
                     filename)
             #assumes uncharged and multiplicity 1
@@ -52,16 +67,26 @@ class Writer(object):
         gaus_cart_file.close()
 
     def write_list(list_, filename, open_type):
+        '''
+        Write out a list of things in a file, each entry is on a new line.
+        '''
         outfile = open(filename, open_type)
         for i in list_:
             outfile.write('{}\n'.format(i))
         outfile.close()
     
     def write_csv(list_, filename, header, delimiter=',', ext='csv'):
+        '''
+        Write out an array in .csv format.
+        '''
         np.savetxt('{}.{}'.format(filename, ext), np.column_stack(list_), 
                 delimiter=delimiter, header=header, fmt='%.6f')
 
     def write_amber_inpcrd(coords, filename):
+        '''
+        Not sure if this works, write out 3D coords as Amber input coords
+        file.
+        '''
         natoms = len(coords)
         inpcrd_file = open('{}.inpcrd'.format(filename), 'w')
         inpcrd_file.write('{}\n'.format('default_name')) 
@@ -74,6 +99,10 @@ class Writer(object):
         inpcrd_file.close()
 
     def write_pdb(coords, resname, resid, atoms, filename, open_type):
+        '''
+        Write 3D coords in .pdb format. Provide the resname, resid, atoms
+        and filename.
+        '''
         outfile = open(filename, open_type)
         for i in range(len(atoms)):
             atom_name = '{}{}'.format(Converter._ZSymbol[atoms[i]], i+1)

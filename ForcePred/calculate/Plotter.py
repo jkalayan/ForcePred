@@ -307,7 +307,7 @@ class Plotter(object):
 
 
     def xy_scatter(x_list, y_list, label_list, color_list, 
-            xlabel, ylabel, size_list, plot_name):
+            xlabel, ylabel, size_list, plot_name, log=False):
         fig, ax = plt.subplots(figsize=(10, 10), 
                 edgecolor='k') #all in one plot
         lines = []
@@ -319,6 +319,8 @@ class Plotter(object):
                     )
             lines.append(line)
         Plotter.format(ax, x, y, xlabel, ylabel)
+        if log:
+            ax.set_xscale('log')
         #lgd = Plotter.get_legend(ax, lines, label_list)
         '''
         lgd = ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 

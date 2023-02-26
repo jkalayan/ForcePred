@@ -56,10 +56,10 @@ class XYZParser(object):
         for f in filenames:
             input_ = open(f, 'r')
             for line in input_:
-                xyz = self.clean(self.extract(1, input_))
+                xyz = XYZParser.clean(self, XYZParser.extract(self, 1, input_))
                 var.append(xyz)
         if len(filenames) > 0:
-            var = self.get_3D_array(var, len(self.atoms))
+            var = XYZParser.get_3D_array(self, var, self.natoms)
         return var
 
     def extract(self, padding, input_):

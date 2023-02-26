@@ -111,10 +111,15 @@ def run_force_pred(input_files='input_files',
     print(len(molecule.test))
     '''
 
+    Molecule.sort_by_energy(molecule)
+
     ##truncate dataset
-    molecule.coords = molecule.coords[::100]
-    molecule.forces = molecule.forces[::100]
-    molecule.energies = molecule.energies[::100]
+    #molecule.coords = molecule.coords[::100]
+    #molecule.forces = molecule.forces[::100]
+    #molecule.energies = molecule.energies[::100]
+
+
+
 
     molecule.train = [0]
     molecule.test = [0]
@@ -134,7 +139,7 @@ def run_force_pred(input_files='input_files',
         energies_rms = np.sqrt(np.mean(molecule.energies.flatten()**2))
         forces_mean = np.mean(molecule.forces.flatten())
         energies_mean = np.mean(molecule.energies.flatten())
-        energies_max = np.max(np.absolute(molecule.energies))
+        energies_max = np.max(np.abs(molecule.energies))
         #molecule.energies = (molecule.energies - energies_mean) / energies_rms
         #molecule.forces = (molecule.forces * 0) # forces_rms)
 
@@ -156,8 +161,8 @@ def run_force_pred(input_files='input_files',
                     'comparable to forces')
             min_e = np.min(train_energies)
             max_e = np.max(train_energies)
-            min_f = np.min(train_forces)
-            max_f = np.max(train_forces)
+            min_f = np.min(np.abs(train_forces))
+            max_f = np.max(np.abs(train_forces))
 
             molecule.energies = ((max_f - min_f) * 
                     (molecule.energies - min_e) / 
@@ -175,9 +180,18 @@ def run_force_pred(input_files='input_files',
         print('prescale value:', prescale)
         sys.stdout.flush()
 
+    ##truncate dataset
+    #molecule.coords = molecule.coords[10000:90000:10]
+    #molecule.forces = molecule.forces[10000:90000:10]
+    #molecule.energies = molecule.energies[10000:90000:10]
 
+    molecule.coords = molecule.coords[:200]#:10]
+    molecule.forces = molecule.forces[:200]#:10]
+    molecule.energies = molecule.energies[:200]#:10]
 
-    bias_type='r'#'1/r'
+    n_structures = len(molecule.coords)
+    print('n_structures', len(molecule.coords))
+    bias_type = '1/r' #'r'#
     print('bias_type:', bias_type)
     Converter.get_simultaneous_interatomic_energies_forces(molecule, 
             bias_type)
@@ -186,6 +200,17 @@ def run_force_pred(input_files='input_files',
     #Converter.get_interatomic_energies_forces_directions(molecule, bias_type)
 
     #Converter.get_atomwise_decompF(molecule, bias_type)
+
+    '''
+    min_e = np.min(molecule.energies)
+    max_e = np.max(molecule.energies)
+    min_q = np.min(np.abs(molecule.mat_FE))
+    max_q = np.max(np.abs(molecule.mat_FE))
+
+    molecule.mat_FE = ((max_e - min_e) * 
+            (molecule.mat_FE - min_q) / 
+            (max_q - min_q) + min_e)
+    '''
 
     #sys.exit()
 
@@ -217,13 +242,15 @@ def run_force_pred(input_files='input_files',
     interatomic_measures.get_bond_pop(molecule.coords, pairs)
 
 
-    print(interatomic_measures.rs.shape, molecule.mat_FE.shape, 
-            molecule.mat_F.shape, molecule.mat_E.shape)
+    #print(interatomic_measures.rs.shape, molecule.mat_FE.shape, 
+            #molecule.mat_F.shape, molecule.mat_E.shape)
         
 
     dists = interatomic_measures.rs.flatten()
     #decompFE = molecule.mat_E.flatten()
-    decompFE = molecule.mat_FE.flatten()
+    decompFE = molecule.mat_FE
+    print('***', decompFE.shape)
+    decompFE = decompFE.flatten()
 
     if len(molecule.mat_FE[0]) == _NC2+1:
         dists = np.ones((len(molecule.coords), _NC2+1))
@@ -269,8 +296,99 @@ def run_force_pred(input_files='input_files',
 
     Plotter.hist_1d([decompFE], 'q / kcal/mol', 'P(q)', 'hist_q.png')
 
-    Plotter.xy_scatter_density(dists, decompFE, '$r_{ij} / \AA$', 
-            'q / kcal/mol', 'density-scatter-r-decompFE.png')
+    if n_structures <= 1000: 
+        Plotter.xy_scatter_density(dists, decompFE, '$r_{ij} / \AA$', 
+                'q / kcal/mol', 'density-scatter-r-decompFE.png')
+
+
+
+    s = np.arange(len(molecule.coords))
+    s_tile_q = np.tile(s, (_NC2,1)).T.flatten()
+    E = molecule.energies.flatten()
+    q = molecule.mat_FE.flatten()
+    q_mean = np.mean(np.abs(molecule.mat_FE), dtype=np.float32, axis=1).flatten()
+    q_max = np.amax(np.abs(molecule.mat_FE), axis=1).flatten()
+    mean_q_max = np.mean(q_max)
+    q_range = (np.amax(molecule.mat_FE, axis=1) - np.amin(molecule.mat_FE, 
+            axis=1)).flatten()
+    q_sum = np.sum(molecule.mat_FE, axis=1)
+    F_max = np.amax(np.abs(molecule.forces).reshape(
+            -1,3*n_atoms), axis=1).flatten()
+
+    b = 200
+    q_close_idx = np.where((q_max <= mean_q_max + b) & (q_max >= mean_q_max - b))
+    q_close_idx2 = np.where((q_max > mean_q_max + b) | (q_max < mean_q_max - b)) # or
+    q_close_idx3 = np.where((q_max < 25)) # or
+    print('n_filtered_structures', len(q_close_idx[0]))
+    print('n_filtered_structures2', len(q_close_idx2[0]))
+    q_close = np.take(q_max, q_close_idx, axis=0)
+    q_close2 = np.take(q_max, q_close_idx2, axis=0)
+    q_close3 = np.take(q_max, q_close_idx3, axis=0)
+    F_close = np.take(F_max, q_close_idx, axis=0)
+    s_close = np.take(s, q_close_idx, axis=0)
+    s_close2 = np.take(s, q_close_idx2, axis=0)
+    s_close3 = np.take(s, q_close_idx3, axis=0)
+
+    dists_close = np.take(interatomic_measures.rs, q_close_idx, axis=0).flatten()
+    decompFE_close = np.take(molecule.mat_FE, q_close_idx, axis=0)
+    print('***', decompFE_close.shape)
+    decompFE_close = decompFE_close.flatten()
+
+    dists_close2 = np.take(interatomic_measures.rs, q_close_idx2, axis=0).flatten()
+    decompFE_close2 = np.take(molecule.mat_FE, q_close_idx2, axis=0)
+    print('***2', decompFE_close2.shape)
+    decompFE_close2 = decompFE_close2.flatten()
+
+    dists_close3 = np.take(interatomic_measures.rs, q_close_idx3, axis=0).flatten()
+    decompFE_close3 = np.take(molecule.mat_FE, q_close_idx3, axis=0)
+    print('***3', decompFE_close3.shape)
+    decompFE_close3 = decompFE_close3.flatten()
+
+    print('abs max_q: {} abs min_q: {}'.format(
+        max(abs(q)), min(abs(q))))
+
+    Plotter.xy_scatter([E], [q_mean], [''], ['k'],
+            'scaled E / kcal/mol/$\AA$', 'q (mean) / kcal/mol/$\AA$',  [10], 
+            'scatter-q_mean-E.png')
+    Plotter.xy_scatter([E], [q_max], [''], ['k'],
+            'scaled E / kcal/mol/$\AA$', 'q (max) / kcal/mol/$\AA$',  [10], 
+            'scatter-q_max-E.png')
+    Plotter.xy_scatter([E], [q_range], [''], ['k'],
+            'scaled E / kcal/mol/$\AA$', 'q (range) / kcal/mol/$\AA$',  [10], 
+            'scatter-q_range-E.png')
+    Plotter.xy_scatter([E], [q_sum], [''], ['k'],
+            'scaled E / kcal/mol/$\AA$', 'q (sum) / kcal/mol/$\AA$',  [10], 
+            'scatter-q_sum-E.png')
+    Plotter.xy_scatter([s], [q_max], [''], ['k'],
+            'Structure #', 'q (max) / kcal/mol/$\AA$',  [10], 
+            'scatter-s-q_max.png')
+    Plotter.xy_scatter([s_close], [q_close], [''], ['k'],
+            'Structure #', 'q (close) / kcal/mol/$\AA$',  [10], 
+            'scatter-s-q_close.png')
+    Plotter.xy_scatter([s_close2], [q_close2], [''], ['k'],
+            'Structure #', 'q (close) / kcal/mol/$\AA$',  [10], 
+            'scatter-s-q_close2.png')
+    Plotter.xy_scatter([s_close3], [q_close3], [''], ['k'],
+            'Structure #', 'q (close) / kcal/mol/$\AA$',  [10], 
+            'scatter-s-q_close3.png')
+    Plotter.xy_scatter([s], [E], [''], ['k'],
+            'Structure #', 'E / kcal/mol/$\AA$',  [10], 
+            'scatter-s-E.png')
+    Plotter.xy_scatter([s], [F_max], [''], ['k'],
+            'Structure #', 'F (max) / kcal/mol/$\AA$',  [10], 
+            'scatter-s-F_max.png')
+    Plotter.xy_scatter([s_close], [F_close], [''], ['k'],
+            'Structure #', 'F (max) / kcal/mol/$\AA$',  [10], 
+            'scatter-s-F_max_close.png')
+    Plotter.xy_scatter([dists_close], [decompFE_close], [''], ['k'], 
+            '$r_{ij} / \AA$',
+            'q / kcal/mol', [10], 'scatter-r-decompFE_close.png')
+    Plotter.xy_scatter([dists_close2], [decompFE_close2], [''], ['k'], 
+            '$r_{ij} / \AA$',
+            'q / kcal/mol', [10], 'scatter-r-decompFE_close2.png')
+    Plotter.xy_scatter([dists_close3], [decompFE_close3], [''], ['k'], 
+            '$r_{ij} / \AA$',
+            'q / kcal/mol', [10], 'scatter-r-decompFE_close3.png')
 
     '''
     network = Network(molecule)
