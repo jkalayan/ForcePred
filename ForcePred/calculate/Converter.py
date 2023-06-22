@@ -42,16 +42,16 @@ class Converter(object):
         self.mat_r = None
         self.mat_NRF = None
         #self.get_interatomic_forces(molecule)
-        if hasattr(molecule, 'charges'):
-            self.charges = molecule.charges
-            self.get_interatomic_charges(molecule)
+        #if hasattr(molecule, 'charges'):
+            #self.charges = molecule.charges
+            #self.get_interatomic_charges(molecule)
 
     def __str__(self):
         return ('\nN structures: %s,' % (len(self.coords)))
 
 
     def get_all_NRFs(molecule):
-        '''Get NRFs'''
+        '''Not used - Get NRFs'''
         n_atoms = len(molecule.atoms)
         _NC2 = int(n_atoms * (n_atoms-1)/2)
         n_structures = len(molecule.coords)
@@ -69,6 +69,8 @@ class Converter(object):
 
 
     def get_interatomic_forces(self, molecule):
+        '''Not used - for interatomic forces only, no energy info
+        '''
         if len(self.atoms) == len(self.coords[0]):
             n_atoms = len(self.atoms)
             _NC2 = int(n_atoms * (n_atoms-1)/2)
@@ -149,6 +151,7 @@ class Converter(object):
 
     def get_interatomic_charges(self, bias_type='NRF'):
         '''
+        Not used yet, but could be used for future.
         This function takes molecule coords (C), atomic charges (Q) and 
         nuclear charges (Z) and decomposes atomic charges with a bias 
         if selected.
@@ -555,7 +558,8 @@ class Converter(object):
     def get_simultaneous_interatomic_energies_forces(molecule, 
             bias_type='NRF', force_bias=False, qbias=False, 
             remove_ebias=True, norm=True, use_RAD=False, extra_cols=0):
-        '''Get decomposed energies and forces from the same simultaneous
+        '''CURRENTLY USED - 
+        Get decomposed energies and forces from the same simultaneous
         equation'''
 
         n_atoms = len(molecule.atoms)
@@ -944,6 +948,167 @@ class Converter(object):
                         #_N += 1
             #'''
         #sys.exit()
+
+
+    def get_qE_from_qF(molecule, 
+            bias_type='NRF', force_bias=False, qbias=False, 
+            remove_ebias=True, norm=True, use_RAD=False, extra_cols=0):
+        '''TESTING --
+        Idea is to decommpose the forces as in the original scheme 
+        Ramzan et al, but then take these q_F and scale so that they sum to
+        1, then use these scaled q_F as the bias/scaling for the molecule
+        energies, which can be any values really, but for now, still scaled
+        by the max Cartesian force magnitude in the training set.
+        '''
+
+        n_atoms = len(molecule.atoms)
+        _NC2 = int(n_atoms * (n_atoms-1)/2)
+        n_structures = len(molecule.coords)
+
+        #force_bias = True #False
+        #qbias = False
+        remove_ebias = False #True #
+        #norm = True
+        #use_RAD = False
+        #extra_cols = n_atoms #1 #
+
+        print('\nbias_type: {} \nforce_bias: {} \nq_bias: {} '\
+                '\nremove_ebias: {} \nnorm: {} \nuse_RAD: {} '\
+                '\nextra_cols:{}'.format(
+                bias_type, force_bias, qbias, remove_ebias, norm, use_RAD,
+                extra_cols))
+
+        molecule.mat_NRF = np.zeros((n_structures, _NC2))
+        molecule.mat_r = np.zeros((n_structures, _NC2))
+        molecule.mat_bias = np.zeros((n_structures, _NC2+extra_cols))
+        molecule.mat_unnorm_bias = np.zeros((n_structures, _NC2+extra_cols))
+        molecule.mat_FE = np.zeros((n_structures, _NC2+extra_cols))
+        molecule.mat_eij = np.zeros((n_structures, n_atoms*3+1, 
+                _NC2+extra_cols))
+
+        molecule.mat_F = np.zeros((n_structures, _NC2+extra_cols))
+        molecule.mat_E = np.zeros((n_structures, _NC2+extra_cols))
+
+
+
+        molecule.vector_NRF = np.zeros((n_structures, 3, _NC2))
+        for s in range(n_structures):
+            mat_Fvals = np.zeros((n_atoms, 3, _NC2+extra_cols))
+            com = np.sum(molecule.coords[s], axis=0) / n_atoms
+            _N = -1
+            for i in range(n_atoms):
+                zi = molecule.atoms[i]
+                for j in range(i):
+                    _N += 1
+                    zj = molecule.atoms[j]
+                    r = Converter.get_r(molecule.coords[s][i], 
+                            molecule.coords[s][j])
+                    molecule.mat_r[s,_N] = r
+
+                    cos_theta = Converter.get_angle(molecule.coords[s][i], 
+                            com, molecule.coords[s][j])
+                    molecule.mat_NRF[s,_N] = Converter.get_NRF(zi, zj, r)
+
+                    bias = molecule.mat_NRF[s,_N]
+                    if bias_type != 'NRF':
+                        bias = Converter.get_bias(zi, zj, r, bias_type)
+                    molecule.mat_bias[s,_N] = bias
+                    if bias_type == 'eij':
+                        molecule.mat_bias[s,_N] = 0 
+                    if extra_cols == n_atoms:
+                        molecule.mat_bias[s][_NC2+i] += (bias) / n_atoms
+                        molecule.mat_bias[s][_NC2+j] += (bias) / n_atoms
+                    molecule.mat_eij[s,n_atoms*3,_N] = bias
+                    for x in range(0, 3):
+                        val = ((molecule.coords[s][i][x] - 
+                                molecule.coords[s][j][x]) / 
+                                molecule.mat_r[s,_N])
+                        if force_bias:
+                            val *= bias
+                        mat_Fvals[i,x,_N] = val
+                        mat_Fvals[j,x,_N] = -val
+                        molecule.mat_eij[s,i*3+x,_N] = val
+                        molecule.mat_eij[s,j*3+x,_N] = -val
+                        if bias_type == 'eij':
+                            molecule.mat_bias[s,_N] += val
+
+                        val2 = ((molecule.coords[s][i][x] - 
+                                molecule.coords[s][j][x]) / 
+                                molecule.mat_r[s,_N] ** 2)
+                        molecule.vector_NRF[s,x,_N] = val2 * zi * zj
+                    
+
+            mat_Fvals2 = mat_Fvals.reshape(n_atoms*3,_NC2+extra_cols)
+            forces2 = molecule.forces[s].reshape(n_atoms*3)
+
+            if extra_cols == 1:
+                molecule.mat_bias[s][_NC2:] = 1
+
+            molecule.mat_unnorm_bias[s] = np.copy(molecule.mat_bias[s])
+            if norm:
+                norm_recip_r = np.sum(molecule.mat_bias[s] ** 2) ** 0.5
+                molecule.mat_bias[s] = molecule.mat_bias[s] / norm_recip_r
+                molecule.mat_eij[s,-1] = molecule.mat_bias[s]
+
+
+
+            mat_F = mat_Fvals2
+            _F = forces2.flatten()
+            decomp_F = np.matmul(np.linalg.pinv(mat_F), _F)
+            # normalise q_F so that the abs sum of them == 1
+            norm_decomp_F = decomp_F / np.sum(np.abs(decomp_F))
+            norm_decomp_F = norm_decomp_F.reshape((1,-1))
+
+
+            mat_bias2 = molecule.mat_bias[s].reshape((1,_NC2+extra_cols))
+            _E = molecule.energies[s].reshape(1)
+
+            decomp_E = np.matmul(np.linalg.pinv(norm_decomp_F), _E.flatten())
+
+            recomp_E = np.sum(decomp_E.reshape(1,-1) * norm_decomp_F)
+            if s < 5:
+                print('decomp_F', decomp_F)
+                print('norm_decomp_F', norm_decomp_F)
+                print('decomp_E', decomp_E)
+                print('recomp_E', recomp_E)
+                print('_E', _E)
+                print()
+            #sys.exit()
+
+            mat_FE = np.concatenate((mat_Fvals2, mat_bias2), axis=0)
+            _FE = np.concatenate([forces2.flatten() , _E.flatten()])
+
+
+
+            decomp_FE = np.matmul(np.linalg.pinv(mat_FE), _FE)
+            molecule.mat_FE[s] = decomp_FE
+
+
+            mat_FE = mat_Fvals2
+            _FE = forces2.flatten()
+
+            decompFE = np.matmul(np.linalg.pinv(mat_FE), _FE)
+
+            decompFE = decompFE.reshape((1,-1)) #q_F
+            _E = _E.reshape((1,1))
+
+            decompFE2 = np.matmul(np.linalg.pinv(decompFE), _E) #q_E
+            recompE = np.dot(decompFE, decompFE2)
+            recompF = np.dot(molecule.mat_eij[s,:-1], decompFE.T)
+            molecule.mat_F[s] = decompFE
+            molecule.mat_E[s] = decompFE2.reshape((1,-1))
+
+
+
+            if qbias:
+                molecule.mat_FE[s] = (decomp_FE *
+                        molecule.mat_unnorm_bias[s]) #
+            if remove_ebias:
+                molecule.mat_FE[s] = (decomp_FE *
+                        molecule.mat_bias[s]) #
+
+
+
 
 
     def get_interatomic_energies_forces_directions(molecule, 
@@ -1589,10 +1754,36 @@ class Converter(object):
         c_rotated = np.zeros((n_atoms,3))
         for i in range(n_atoms):
             c_translated[i] = coords[i] - com
-            for j in range(3):
-                c_rotated[i][j] = np.dot(c_translated[i], _PA[j])
+            #for j in range(3):
+                #c_rotated[i][j] = np.dot(c_translated[i], _PA[j])
         return c_translated
         #return c_rotated
+
+    def superimpose_coords(start_coords, coords, masses, n_atoms, 
+            translate=False):
+        '''
+        Translate coordinates so that the centre of mass of the molecule is
+        at (0,0,0).
+        '''
+        if translate:
+            start_c_translated = np.zeros((n_atoms,3))
+            c_translated = np.zeros((n_atoms,3))
+            _PA, _MI, com = Converter.get_principal_axes(start_coords, masses)
+            _PA2, _MI2, com2 = Converter.get_principal_axes(coords, masses)
+            for i in range(n_atoms):
+                start_c_translated[i] = start_coords[i] - com
+                c_translated[i] = coords[i] - com2
+            start_coords = start_c_translated
+            coords = c_translated
+        h = coords.T @ start_coords
+        u, s, vt = np.linalg.svd(h)
+        v = vt.T
+        d = np.linalg.det(v @ u.T)
+        e = np.array([[1,0,0], [0,1,0], [0,0,d]])
+        r = v @ e @ u.T
+        tt = start_coords - np.matmul(r, coords)
+
+        return tt
 
     def rotate_forces(forces, coords, masses, n_atoms):
         '''

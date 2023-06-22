@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 class Binner(object):
     '''
     This class is used to calculate bond properties, such as angles,
-    dihedrals, etc. And the bin this data into a histogram.
+    dihedrals, etc. And then bin this data into a histogram.
     There are also some functions to calculate errors.
     '''
  

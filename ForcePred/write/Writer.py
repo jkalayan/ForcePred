@@ -50,7 +50,7 @@ class Writer(object):
             #method = '# B3LYP/6-31+G(d) {}'.format(method_type)
             method = '# PBEPBE/Def2SVP FORCE POP=MK '\
                     'INTEGRAL=(GRID=ULTRAFINE) '\
-                    'SCF=(MaxCycle=512)'
+                    'SCF=(MaxCycle=2024)'
             title = '{} calculate {} {}'.format(molecule, method_type, 
                     filename)
             #assumes uncharged and multiplicity 1

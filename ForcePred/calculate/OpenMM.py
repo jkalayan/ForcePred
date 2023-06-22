@@ -38,7 +38,8 @@ class OpenMM(object):
         self.velocities = []
 
 
-    def get_system(masses, pdb_file, dt, gaff=False, mlff=True, mlmm=False):
+    def get_system(masses, pdb_file, dt, temp=500, gaff=False, 
+            mlff=True, mlmm=False):
         '''setup system for MD with OpenMM
 
         Vars:
@@ -97,6 +98,8 @@ class OpenMM(object):
                     nonbondedMethod=PME, nonbondedCutoff=0.8*nanometer)
             '''
 
+            #prmtop = AmberPrmtopFile('../../revised_data/molecules.prmtop')
+            #inpcrd = AmberInpcrdFile('../../revised_data/molecules.inpcrd')
             prmtop = AmberPrmtopFile('../revised_data/molecules.prmtop')
             inpcrd = AmberInpcrdFile('../revised_data/molecules.inpcrd')
             mm_system = prmtop.createSystem()
@@ -195,7 +198,7 @@ class OpenMM(object):
 
         if mlff:
             #intial coords need to be in pdb format or amber, gromacs, charmm
-            pdb_file='../revised_data/molecule.pdb'
+            #pdb_file='../revised_data/molecule.pdb'
             #pdb_file='molecule.pdb'
             pdb = PDBFile(pdb_file)
             n_atoms = len(pdb.getPositions())
@@ -255,8 +258,8 @@ class OpenMM(object):
         ## setup simulation conditions
         ts = (0.5*femtoseconds).in_units_of(picoseconds) #1 ps == 1e3 fs
         coupling = 1 #50 #2 and 100K, 50 and 300K 
-        temperature = 300 #300 #500 #300
-        print('temperature {}K coupling {} ps^-1'.format(temperature, 
+        #temp = 500 #300 #500 #300
+        print('temperature {}K coupling {} ps^-1'.format(temp, 
             coupling))
 
         #NVE Verlet only
@@ -271,7 +274,7 @@ class OpenMM(object):
         #'''
         #Langevin
         print('Langevin thermostat, coupling {}'.format(coupling))
-        integrator = LangevinIntegrator(temperature*kelvin, 
+        integrator = LangevinIntegrator(temp*kelvin, 
                 coupling/picoseconds, ts)
         #'''
 
@@ -293,14 +296,14 @@ class OpenMM(object):
                 'num_mts {}, num_yosh {}'.format(chain_length, 
                 collision_frequency, num_mts, num_yoshidasuzuki))
         integrator = openmmtools.integrators.NoseHooverChainVelocityVerletIntegrator(
-                system, temperature*kelvin, collision_frequency, ts, 
+                system, temp*kelvin, collision_frequency, ts, 
                 chain_length, num_mts, num_yoshidasuzuki)
         '''
 
         '''
         #BAOAB
         integrator = openmmtools.integrators.GeodesicBAOABIntegrator(
-                K_r=2, temperature=temperature, 
+                K_r=2, temperature=temp, 
                 collision_rate=(1*1000)/picoseconds, timestep=ts)
         '''
 
@@ -316,7 +319,8 @@ class OpenMM(object):
             simulation.context.setPositions(inpcrd.positions)
         #simulation.minimizeEnergy()
         #simulation.reporters.append(PDBReporter('openmm.pdb', 1))
-        simulation.reporters.append(StateDataReporter('openmm.csv', dt, #10000,
+        simulation.reporters.append(StateDataReporter(
+                'simulation/openmm.csv', dt, #10000,
                 #1000, #
                 step=True, potentialEnergy=True, kineticEnergy=True, 
                 temperature=True))
@@ -334,7 +338,8 @@ class OpenMM(object):
                 kilocalories_per_mole/angstrom) #in kcal/mol/A
         #print('init_forces', init_forces[:n_atoms_model])
 
-        simulation.reporters.append(DCDReporter('o-trajectory.dcd', dt #10000
+        simulation.reporters.append(DCDReporter(
+                'simulation/o-trajectory.dcd', dt #10000
                 ))
 
         return system, simulation, force, integrator, \
@@ -347,11 +352,9 @@ class OpenMM(object):
         '''Run MD with OpenMM for nsteps'''
 
         #mlmm = False
-        NVT = False
-        if NVT:
-            #set temperature for integrator
-            integrator.setTemperature(temperature)
-            print(integrator.getTemperature())
+        #set temperature for integrator
+        #integrator.setTemperature(temperature)
+        #print(integrator.getTemperature())
         equiv_atoms = False
         pairs_dict = None
         if equiv_atoms:
@@ -376,12 +379,12 @@ class OpenMM(object):
 
 
         for i in range(nsteps):
-            f1 = open('openmm-coords.txt', 'a')          
-            f2 = open('openmm-forces.txt', 'a') 
-            f3 = open('openmm-velocities.txt', 'a') 
-            f4 = open('openmm-delta_energies.txt', 'a')
-            #f5 = open('openmm-f-curl.txt', 'a')
-            f6 = open('openmm-mm-forces.txt', 'a')
+            f1 = open('simulation/openmm-coords.txt', 'a')          
+            f2 = open('simulation/openmm-forces.txt', 'a') 
+            f3 = open('simulation/openmm-velocities.txt', 'a') 
+            f4 = open('simulation/openmm-delta_energies.txt', 'a')
+            #f5 = open('simulation/openmm-f-curl.txt', 'a')
+            f6 = open('simulation/openmm-mm-forces.txt', 'a')
 
             #print(i)
             time = simulation.context.getState().getTime().in_units_of(
@@ -408,11 +411,11 @@ class OpenMM(object):
                             #'openmm-coords-all.xyz', 'a', time)
                     Writer.write_xyz([positions[:n_atoms_model]/angstrom], 
                             all_atoms[:n_atoms_model], 
-                            'openmm-coords.xyz', 'a', time)
+                            'simulation/openmm-coords.xyz', 'a', time)
                     np.savetxt(f6, mm_forces[:n_atoms_model])
                 if mlmm == False:
                     Writer.write_xyz([positions/angstrom], md.atoms, 
-                            'openmm-coords.xyz', 'a', time)
+                            'simulation/openmm-coords.xyz', 'a', time)
                 np.savetxt(f1, positions[:n_atoms_model])
                 np.savetxt(f2, forces[:n_atoms_model])
                 np.savetxt(f3, velocities[:n_atoms_model])
@@ -537,6 +540,15 @@ class OpenMM(object):
                 mm_forces
 
 
+    def predict_force_internal_FE(positions, atoms, model):
+        '''Currently used, take current atom positions and predict
+        forces from gradient of energy'''
+        prediction = model.predict([positions.reshape(1,-1,3), 
+                atoms.reshape(1,-1)])
+        forces = prediction[0]#[2]
+        return forces, None
+
+
     def predict_force(positions, network, model, equiv_atoms, pairs_dict):
         '''
         Not used anymore, was used for older model of force prediction
@@ -582,6 +594,7 @@ class OpenMM(object):
 
         return recomp_forces
 
+
     def predict_scaled_force(positions, network, model):
         '''
         not used anymore, for old ML model when forces directly predicted
@@ -607,13 +620,7 @@ class OpenMM(object):
                 network.scale_F, model, dr, bias_type, molecule, prescale)
         return scaled_F, curl
 
-    def predict_force_internal_FE(positions, atoms, model):
-        '''Currently used, take current atom positions and predict
-        forces from gradient of energy'''
-        prediction = model.predict([positions.reshape(1,-1,3), 
-                atoms.reshape(1,-1)])
-        forces = prediction[0]#[2]
-        return forces, None
+
 
     def translate_coords(init_coords, coords, atoms):
         '''translate molecule center-of-mass to centre of box'''

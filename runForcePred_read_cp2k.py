@@ -115,7 +115,7 @@ def run_force_pred(input_files='input_files',
             else:
                 continue
         energies += file_energies[-10000:]
-    molecule.energies = np.array(energies).reshape(-1,1)[::5]
+    molecule.energies = np.array(energies).reshape(-1,1)#[::5]
     print('** E', molecule.energies[:10])
     molecule.energies = np.asarray(molecule.energies, 
             dtype='float64') * Converter.Eh2kcalmol
@@ -153,7 +153,7 @@ def run_force_pred(input_files='input_files',
             coord_paths, 
             molecule.coords)
     molecule.coords = np.array(molecule.coords).reshape(
-            -1,molecule.natoms, 3)[::5]
+            -1,molecule.natoms, 3)#[::5]
     #molecule.coords = np.take(molecule.coords, all_atom_order, axis=1)
     print('coords', molecule.coords[0][:len(molecule.atoms)], 
             molecule.coords.shape)
@@ -175,7 +175,7 @@ def run_force_pred(input_files='input_files',
             force_paths,
             molecule.forces)
     molecule.forces = np.array(molecule.forces).reshape(
-            -1,molecule.natoms, 3)[::5]
+            -1,molecule.natoms, 3)#[::5]
     #molecule.forces = np.take(molecule.forces, all_atom_order, axis=1)
     print('** forces', molecule.forces[0][:len(molecule.atoms)], 
             molecule.forces.shape)
@@ -201,7 +201,7 @@ def run_force_pred(input_files='input_files',
         #print(file_dft_forces[0], len(file_dft_forces))
         dft_forces += file_dft_forces[-10000*len(molecule.atoms):]
     molecule.dft_forces = np.array(dft_forces).reshape(
-            -1,len(molecule.atoms), 3)[::5]
+            -1,len(molecule.atoms), 3)#[::5]
     molecule.dft_forces = np.take(molecule.dft_forces, 
             molecule.atom_order, axis=1) 
     print('** dft_forces', molecule.dft_forces[0], molecule.dft_forces.shape)
@@ -226,7 +226,7 @@ def run_force_pred(input_files='input_files',
                 continue
         #print(file_dft_energies[0], len(file_dft_energies))
         dft_energies += file_dft_energies[-20000:][1::2] #to match other files
-    molecule.dft_energies = np.array(dft_energies).reshape(-1,1)[::5]
+    molecule.dft_energies = np.array(dft_energies).reshape(-1,1)#[::5]
     print('** dft_E', molecule.dft_energies[:10])
     molecule.dft_energies = np.asarray(molecule.dft_energies, 
             dtype='float64') * Converter.Eh2kcalmol

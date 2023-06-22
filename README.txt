@@ -10,50 +10,127 @@ ANYTHING BELOW THE LINE MIGHT NOT BE RELEVANT
     Python libraries needed to run ForcePred. The installation could take 
     about 10 minutes.
 
+2.  To train an artificial neural network (ANN), you will need the following
+    training data+dimensions+units for a given molecule:
+    - nuclear charges (1,N_atoms) Z
+    - Cartesian coordinates (3,N_atoms*N_structures) Angstrom
+    - Cartesian forces (3,N_atoms*N_structures) kcal/mol/Angstrom
+    - Molecule energies (1,N_structures) kcal/mol
 
+    ASIDE: The program does have a class to read in Gaussian files directly 
+    and convert to the units above if needed.
 
+3.  To train/test an ANN, the following python script can be used:
+    > runloadForcePred.py
+    This will output a folder called model, which contains all the information
+    needed to reload the model weights and scaling factors.
+    The corresponding csf jobscript for this python script is:
+    > submit_runloadForcePred.sh
 
+4.  To load a previously trained ANN and perform MD simulations with predicted
+    forces, the following python script can be used:
+    > runloadForcePred.py
+    By including the --load_model flag, and removing flags for input files, 
+    This will recreate the ANN archtecture and load weights from a trained
+    model.
+    The corresponding csf jobscript for this python script is:
+    > submit_runloadForcePred.py
 
+5.  Use the following command in your loaded conda environment to print out 
+    the flag options for a python script:
+    > <python_script_name> -h
 
-_______________________________________________________________________________
+    usage: runloadForcePred.py [-h]
 
-RUNNING AN ANN WITH YOUR GENERATED DATA
- 
-I’ve written a script for you to run an ANN with your generated data. You have two sets of data, one is the training data, and from this we pick a few structures (around 5% of the training structures) to validate the ANN during training. Your test data (which you’ve labelled as validation) is the data that is not used to train the network and is instead used to test how well the trained ANN performs with unseen data.
- 
-The ForcePred folder contains the python program used to train an ANN. Please put this in a folder called bin in your home directory on the CSF.
- 
-The submit_NN.sh file is the job script used to submit the job to the CSF. There are a few variables in this job script that you can change.
- 
-FILES_PATH="displaced_*/glycol*/glycol*.out"
-This is the path to all your .out files. This assumes that your .out files containing training data will be read before your .out files containing test data. So make sure the folder name containing your training data comes alphanumerically before the folder name containing you test data!
-N_TRAINING=291
-How many training structures you have.
-N_VAL=15
-How many validation structures from the training data, usually 5% of N_TRAINING
-N_NODES=1000
-The number of hidden nodes used in ANN, keep this at 1000 for now
-N_LAYERS=1
-The number of hidden dense layers used in ANN, keep this at 1 for now
-GRAD_LOSS_W=1000
-How much to weight the gradient loss function, the loss function is how we evaluate the error in our ML predictions. Keep this to 1000 for now
-QFE_LOSS_W=1
-How much to weight the decomposed forces and energies in the loss function, keep this at 1 for now
-E_LOSS_W=1
-How much to weight the energy in the loss function, keep this at 1 for now
- 
-You can then submit the job script with;
- 
-qsub submit_NN.sh
- 
-If you successfully run the job, then there will be quite few output files.
-idx_*.dat – These files contain the indices of the structures used for training, validation and testing.
-molecule_*.dat – These files contain the coordinates, forces, energies and nuclear charges of all the structures. Neil might want to use these files.
-testset_hist_*.dat – These files contain the histogram data for s-curves, which tells us what percentage of structures (second column) have errors below a given value (first column). You could try to plot these using matplotlib if you like, just make sure your error axis is a log scale.
-all_energies.csv – These files contain energies of all the structures (first column) and the predicted energies from the ANN (second column)
-file.log – this is the log file from the script and contains information about reading in structures, scaling energies, training the network and the end of the file contains the test errors for gradients, pairwise decomposed forces and energies and the molecule energy. The MAE is probably what you’ll be using to assess how accurately you trained ANN is predicted molecular properties.
-model – in this folder, you’ll find the outputted model weights of the best_ever_model generated from training. These files are not human readable but will be used if we decide to run some MD simulations with your ANN models.
- 
- 
- 
+    Program for reading in molecule forces, coordinates and energies for force
+    prediction.
+
+    optional arguments:
+      -h, --help            show this help message and exit
+      -i file [file ...], --input_files file [file ...]
+                            name of file/s containing forces coordinates and
+                            energies. (default: [])
+      -a file, --atom_file file
+                            name of file/s containing atom nuclear charges.
+                            (default: None)
+      -c file [file ...], --coord_files file [file ...]
+                            name of file/s containing coordinates. (default: [])
+      -f file [file ...], --force_files file [file ...]
+                            name of file/s containing forces. (default: [])
+      -e file [file ...], --energy_files file [file ...]
+                            name of file/s containing energies. (default: [])
+      -q file [file ...], --charge_files file [file ...]
+                            name of file/s containing charges. (default: [])
+      -l file, --list_files file
+                            file containing list of file paths. (default: False)
+      -n_nodes N_NODES, --n_nodes N_NODES
+                            number of nodes in neural network hidden layer/s
+                            (default: 1000)
+      -n_layers N_LAYERS, --n_layers N_LAYERS
+                            number of dense layers in neural network (default: 1)
+      -n_training N_TRAINING, --n_training N_TRAINING
+                            number of data points for training neural network
+                            (default: 1000)
+      -n_val N_VAL, --n_val N_VAL
+                            number of data points for validating neural network
+                            (default: 50)
+      -n_test N_TEST, --n_test N_TEST
+                            number of data points for testing neural network
+                            (default: -1)
+      -grad_loss_w GRAD_LOSS_W, --grad_loss_w GRAD_LOSS_W
+                            loss weighting for gradients (default: 1000)
+      -qFE_loss_w QFE_LOSS_W, --qFE_loss_w QFE_LOSS_W
+                            loss weighting for pairwise decomposed forces and
+                            energies (default: 1)
+      -E_loss_w E_LOSS_W, --E_loss_w E_LOSS_W
+                            loss weighting for energies (default: 1)
+      -epochs EPOCHS, --epochs EPOCHS
+                            number of epochs for training (default: 1000000)
+      -bias BIAS, --bias BIAS
+                            choose the bias used to describe decomposed/pairwise
+                            terms, options are - 1: No bias (bias=1) 1/r: 1/r bias
+                            1/r2: 1/r^2 bias NRF: bias using nuclear repulsive
+                            forces (zA zB/r^2) r: r bias (default: 1/r)
+      -filtered, --filtered
+                            filter structures by removing high magnitude q
+                            structures (default: False)
+      -load_model LOAD_MODEL, --load_model LOAD_MODEL
+                            load an existing network to perform MD, provide the
+                            path+folder to model here (default: None)
+      -temp TEMP, --temp TEMP
+                            set temperature (K) of MD simulation (default: 500)
+      -nsteps NSTEPS, --nsteps NSTEPS
+                            set number of steps to take for MD simulation, each
+                            time step is 0.5 fs (default: 200)
+      -dt DT, --dt DT       interval between number of steps saved to file
+                            (default: 10)
+
+6.	Output files:
+	For training -  
+		the training.log file contains info about how energies have been
+	scaled and then the loss values for each epoch during training. At the end of
+	the file, the errors for energy, force and decompFE are printed. 
+		In the plots/ folder, there are several plots of s-curves, loss curve, 
+	histogram of qs for the inputted structures and a scatter plot of r vs decompFE.
+		In the model/ folder, the best_ever_model* files contain the ANN model
+	weights, etc., needed for tensorflow to reload the model. 
+	> molecule.pdb, atoms.txt - initial starting structure and nuclear charges 
+		used to perform MD simulations later with OpenMM.
+	> prescale.txt - scaling information needed to scale molecule energies in
+		ANN model predictions, list of six values for training structures are: 
+		[min_E/kcal/mol, max_E/kcal/mol, 
+		min(abs(F/kcal/mol/Ang)), max(abs(F/kcal/mol/Ang)), 
+		max(abs(NRF/kcal/mol/Ang)), max(abs(q/kcal/mol/Ang))]
+
+	For loading - 
+		the loading.log file contains info about what ANN model is loaded
+	and general prints of simulation conditions. In the simulation/ folder, there
+	are files for the following;
+	> openmm.csv - log of the step, PE, KE and temp in each simulation frame saved
+	> openmm-coords.txt/.xyz / o-trajectory.dcd - coordinates of simulated system 
+		in three different formats.
+	> openmm-forces.txt - predicted forces for each saved frame
+	> openmm-delta-energies.txt - change in energy of molecule compared to first
+		frame of simulation. 
+	
 

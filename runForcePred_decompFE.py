@@ -59,8 +59,8 @@ def run_force_pred(input_files='input_files',
     #read in input data files
     if list_files:
         input_files = open(list_files).read().split()
-    #OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
-    NPParser(atom_file, coord_files, force_files, energy_files, molecule)
+    OPTParser(input_files, molecule, opt=False) #read in FCEZ for SP
+    #NPParser(atom_file, coord_files, force_files, energy_files, molecule)
     print(datetime.now() - startTime)
     sys.stdout.flush()
 
@@ -69,14 +69,17 @@ def run_force_pred(input_files='input_files',
     _NC2 = int(n_atoms * (n_atoms-1)/2)
     sys.stdout.flush()
 
-    molecule.coords = molecule.coords[:5]
-    molecule.forces = molecule.forces[:5]
-    molecule.energies = molecule.energies[:5]
+    #molecule.coords = molecule.coords[:5]
+    #molecule.forces = molecule.forces[:5]
+    #molecule.energies = molecule.energies[:5]
 
 
     isExist = os.path.exists('model')
     if not isExist:
         os.makedirs('model')
+    isExist = os.path.exists('plots')
+    if not isExist:
+        os.makedirs('plots')
     # write pdb file for first frame
     Writer.write_pdb(molecule.coords[0], 'MOL', 1, molecule.atoms, 
             'model/molecule.pdb', 'w')

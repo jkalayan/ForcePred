@@ -118,7 +118,7 @@ class OPTParser(object):
                         self.forces.append(force)
                         self.energies.append(energy)
                         self.charges.append(charges)
-            #print()
+            print(self.opt_structures)
             sys.stdout.flush()
             if self.atoms == self.new_atoms:
                 self.new_atoms = []

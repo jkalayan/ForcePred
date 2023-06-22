@@ -499,7 +499,7 @@ class Network(object):
     def get_coord_FE_model(self, molecule, prescale1, n_nodes=1000, 
             n_layers=1, grad_loss_w=1000, qFE_loss_w=1, E_loss_w=1, 
             extra_cols=0, bias='1/r', training_model=True,
-            load_model=None):
+            load_model=None, epochs=1_000_000):
         '''Input coordinates and z_types into model to get NRFS which then 
         are used to predict decompFE, which are then recomposed to give
         Cart Fs and molecular E, both of which could be used in the loss
@@ -872,7 +872,7 @@ class Network(object):
                             val_output_matFE, 
                             val_output_E_postscale, 
                             ]),
-                    epochs=1000000, 
+                    epochs=epochs, #1000000, 
                     verbose=2,
                     batch_size=batch_size,
                     #callbacks=[mc],
@@ -951,6 +951,7 @@ class Network(object):
             test_prediction_F = test_prediction[0]
             test_prediction_matFE = test_prediction[1]
 
+            '''
             print('\npair ave_r min_q max_q mae rms msd')
             ave_rs, max_qs, maes = [], [], []
             largest, info = 0, []
@@ -975,13 +976,14 @@ class Network(object):
             print('\nlargest MAE pair MAE:', info)
             Plotter.xy_scatter([ave_rs], [maes], [''], ['k'], 
                     '$<r_{ij}> / \AA$', 'MAE / kcal/mol/$\AA$', [10], 
-                    'scatter-ave_r-MAE-decompFE.png')
+                    'plots/scatter-ave_r-MAE-decompFE.png')
             Plotter.xy_scatter([ave_rs], [max_qs], [''], ['k'], 
                     '$<r_{ij}> / \AA$', 'max($q$) / kcal/mol/$\AA$', [10], 
-                    'scatter-ave_r-max_q-decompFE.png')
+                    'plots/scatter-ave_r-max_q-decompFE.png')
             Plotter.xy_scatter([max_qs], [maes], [''], ['k'], 
                     'max($q$) / kcal/mol/$\AA$', 'MAE / kcal/mol/$\AA$', [10], 
-                    'scatter-max_q-MAE-decompFE.png')
+                    'plots/scatter-max_q-MAE-decompFE.png')
+            '''
 
             mae, rms, msd = Binner.get_error(test_output_F.flatten(), 
                     test_prediction_F.flatten())
@@ -1007,38 +1009,39 @@ class Network(object):
                     '\nMSE: {:.3f}'.format(
                     len(test_output_E_postscale), mae, rms, msd, rms**2))
 
-            '''
+            #'''
             bin_edges, hist = Binner.get_scurve(
                     test_output_E_postscale.flatten(), 
-                    test_prediction_E.flatten(), 'testset_hist_E.dat')
-            #Plotter.plot_2d([bin_edges], [hist], [''], 
-                    #'Error', '% of points below error', 
-                    #'testset_s_curve_E.png', log=True)
+                    test_prediction_E.flatten(), 'plots/testset_hist_E.dat')
+            Plotter.plot_2d([bin_edges], [hist], [''], 
+                    'Error', '% of points below error', 
+                    'plots/testset_s_curve_E.png', log=True)
             bin_edges, hist = Binner.get_scurve(test_output_F.flatten(), 
-                    test_prediction_F.flatten(), 'testset_hist_F.dat')
-            #Plotter.plot_2d([bin_edges], [hist], [''], 
-                    #'Error', '% of points below error', 
-                    #'testset_s_curves_F.png', log=True)
+                    test_prediction_F.flatten(), 'plots/testset_hist_F.dat')
+            Plotter.plot_2d([bin_edges], [hist], [''], 
+                    'Error', '% of points below error', 
+                    'plots/testset_s_curves_F.png', log=True)
             bin_edges, hist = Binner.get_scurve(test_output_matFE.flatten(), 
-                    test_prediction_matFE.flatten(), 'testset_hist_decompFE.dat')
-            #Plotter.plot_2d([bin_edges], [hist], [''], 
-                    #'Error', '% of points below error', 
-                    #'testset_s_curves_decompFE.png', log=True)
-            '''
+                    test_prediction_matFE.flatten(), 
+                    'plots/testset_hist_decompFE.dat')
+            Plotter.plot_2d([bin_edges], [hist], [''], 
+                    'Error', '% of points below error', 
+                    'plots/testset_s_curves_decompFE.png', log=True)
+            #'''
 
-            '''
+            #'''
             model_loss = result.history['loss']
             model_val_loss = result.history['val_loss']
             Writer.write_csv([model_loss, model_val_loss], 
-                    'loss', 'loss val_loss', delimiter=' ', ext='dat')
+                    'plots/loss', 'loss val_loss', delimiter=' ', ext='dat')
 
             Plotter.plot_2d([list(range(len(model_loss[10:]))), 
                 list(range(len(model_val_loss[10:])))], 
                 [model_loss[10:], model_val_loss[10:]], 
                     ['loss', 'val_loss'], 
                     'Epoch', 'Loss', 
-                    'loss_curves.png')
-            '''
+                    'plots/loss_curves.png')
+            #'''
 
 
             sys.stdout.flush()

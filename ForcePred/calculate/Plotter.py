@@ -11,6 +11,7 @@ from matplotlib.ticker import MaxNLocator
 import matplotlib.colors as colors
 from scipy.interpolate import interp1d
 from scipy.stats import gaussian_kde #density
+from matplotlib import ticker
 
 class Plotter(object):
     '''
@@ -303,6 +304,194 @@ class Plotter(object):
                 bbox_inches='tight',
                 )
         plt.close(plt.gcf())
+
+
+    def error_bars_plot(x_list, y_list, error_list, label_list, 
+            color_list, ls_list, 
+            marker_list, xlabel, ylabel, size_list, 
+            func, plot_name, x_ticks_labels=False, max_val=2):
+        '''Only for two differing scales'''
+        fig, ax = plt.subplots(figsize=(10, 10), 
+                edgecolor='k') #all in one plot
+
+        #ax.axvspan(0, 1, color='grey', alpha=0.5) # x values
+        # grey out plot below a certain value
+        #ax.axhspan(0, 1, color='grey', alpha=0.2, edgecolor='None') # y values
+
+        print(x_list)
+        print(y_list)
+
+        lines = []
+        lines2 = []
+        count = 0
+        for x, y, err, size, label, c, ls, m in zip(x_list, y_list, 
+                error_list, size_list, 
+                label_list, color_list, ls_list, marker_list):
+            print('***', len(x), len(y))
+            print('---', x, y, err)
+            print()
+
+            line = ax.scatter(x, y, label=label, 
+                    s=size, facecolors=c, #'none', #c, #
+                    edgecolors=c, marker=m, lw=2,
+                    )
+            ax.errorbar(x, y, yerr=err, c=c, ls=ls, ecolor=c, capsize=2,
+                    lw=2)
+            #line2 = ax.plot(x, y, c=c, lw=2, ls=ls,
+                    #label=label
+                    #)
+
+            #lines.append(line)
+            #lines2.append(line2)
+            count += 1
+
+        ax.set_ylim([-1, max_val])
+
+        Plotter.format(ax, x, y, xlabel, ylabel)
+        ax.grid(color='grey', linestyle='--', which='major', 
+                axis='x', #'both'
+                linewidth=1)
+        #ax.yaxis.label.set_color(color_list[0])
+
+        if x_ticks_labels:
+            ax.set_xticks(x)
+            ax.set_xticklabels(x_ticks_labels, rotation='vertical'
+                    )
+            #ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+
+        labs = [l.get_label() for l in lines]
+        lgd = ax.legend(lines, labs, bbox_to_anchor=(1.1, 1), 
+                loc='upper left', 
+                prop={'size': Plotter.tick_labels+4})
+        lgd.get_frame().set_alpha(0)
+        fig.savefig('%s' % (plot_name), 
+                #transparent=True,
+                #bbox_extra_artists=(lgd,),
+                bbox_inches='tight',
+                )
+        plt.close(plt.gcf())
+
+
+
+    def twinx_error_bars_plot(x_list, y_list, error_list, label_list, 
+            color_list, ls_list, 
+            marker_list, xlabel, ylabel, ylabel2, size_list, axis_list, 
+            func, plot_name, x_ticks_labels=False, max_val=2):
+        '''Only for two differing scales'''
+        fig, ax = plt.subplots(figsize=(10, 10), 
+                edgecolor='k') #all in one plot
+        ax2 = ax.twinx()
+        #ax.axvspan(0, 1, color='grey', alpha=0.5) # x values
+        ax.axhspan(0, 1, color='grey', alpha=0.2, edgecolor='None') # y values
+        print(x_list)
+        print(y_list)
+
+        lines = []
+        lines2 = []
+        count = 0
+        for x, y, err, size, a, label, c, ls, m in zip(x_list, y_list, 
+                error_list, size_list, 
+                axis_list, label_list, color_list, ls_list, marker_list):
+            #inds2 = x.argsort()
+            #x = x[inds2]
+            #y = y[inds2]
+            print('***', len(x), len(y))
+            print('---', x, y, err)
+            print()
+            if a == 1:
+                line = ax.scatter(x, y, label=label, 
+                        s=size, facecolors=c, #'none', #c, #
+                        edgecolors=c, marker=m, lw=2,
+                        )
+                ax.errorbar(x, y, yerr=err, c=c, ls=ls, ecolor=c, capsize=2,
+                        lw=2)
+                #line2 = ax.plot(x, y, c=c, lw=2, ls=ls,
+                        #label=label
+                        #)
+            if a == 2:
+                line = ax2.scatter(x, y, label=label, 
+                        s=size, facecolors=c, #'none', #
+                        edgecolors=c, marker=m, lw=3,
+                        )
+                ax2.errorbar(x, y, yerr=err, c=c, ls=ls, ecolor=c, capsize=2,
+                        lw=2)
+                #line2 = ax2.plot(x, y, c=c, lw=2, ls=ls,
+                        #label=label
+                        #)
+
+
+
+
+
+            '''
+            x2, inds = np.unique(x, return_index=True)
+            x_unique = x[inds]
+            y_unique = y[inds]
+            xnew = np.linspace(x_unique.min(), x_unique.max(), 1000)
+            f_smooth = interp1d(x_unique, y_unique, kind=2)
+            poly = np.polyfit(x_unique,y_unique,5)
+            poly_y = np.poly1d(poly)(xnew)
+            if func == 'f':
+                curve = f_smooth(xnew)
+                #poly = np.polyfit(x_unique,y_unique,27)
+                #poly_y = np.poly1d(poly)(xnew)
+                #curve = poly_y
+            if func  == 'p':
+                curve = poly_y
+            if a == 1:
+                line2 = ax.plot(xnew, 
+                        #f_smooth(xnew), 
+                        curve, 
+                        c=c, lw=2, ls=ls,
+                        #label=label
+                        )
+            if a == 2:
+                line2 = ax2.plot(xnew, 
+                        #f_smooth(xnew), 
+                        curve, 
+                        c=c, lw=3, ls=ls,
+                        #label=label
+                        )
+            '''
+            #lines.append(line)
+            #lines2.append(line2)
+            count += 1
+
+
+        #ax2.set_ylabel(ylabel2, fontsize=Plotter.axis_labels, 
+                #weight='medium')
+
+        ax.set_ylim([0, max_val])
+        ax2.set_ylim([0, 105])
+
+        Plotter.format(ax2, x, y, xlabel, ylabel2)
+        Plotter.format(ax, x, y, xlabel, ylabel)
+        #ax2.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+        #ax2.yaxis.offsetText.set_fontsize(Plotter.tick_labels)
+        ax.grid(color='grey', linestyle='--', which='major', 
+                axis='x', #'both'
+                linewidth=1)
+        ax.yaxis.label.set_color(color_list[0])
+        ax2.yaxis.label.set_color(color_list[1])
+
+        if x_ticks_labels:
+            ax.set_xticks(x)
+            ax.set_xticklabels(x_ticks_labels, rotation='vertical'
+                    )
+            #ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+
+        labs = [l.get_label() for l in lines]
+        lgd = ax.legend(lines, labs, bbox_to_anchor=(1.1, 1), 
+                loc='upper left', 
+                prop={'size': Plotter.tick_labels+4})
+        lgd.get_frame().set_alpha(0)
+        fig.savefig('%s' % (plot_name), 
+                #transparent=True,
+                #bbox_extra_artists=(lgd,),
+                bbox_inches='tight',
+                )
+        plt.close(plt.gcf())
+
 
 
 

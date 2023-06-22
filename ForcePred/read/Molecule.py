@@ -44,13 +44,13 @@ class Molecule(object):
         if hasattr(other, 'energies'):
             if len(other.energies) > 0:
                 self.energies = self.get_2D_array(other.energies)
-        '''
+        #'''
         if hasattr(other, 'charges'):
             if len(other.charges) > 0:
                 self.charges = self.get_2D_array(other.charges).reshape(
                         -1,len(self.atoms))
             #self.charges = self.get_3D_array(other.charges)
-        '''
+        #'''
 
     def check_force_conservation(self):
         '''Ensure that forces in each structure translationally and 
@@ -210,7 +210,7 @@ class Molecule(object):
             for j in range(i):
                 r = Converter.get_r(coords[i], coords[j])
                 #print(i+1,j+1,r)
-                if r < 1.6:
+                if r < 1.5: #1.6
                     A[i,j] = 1
                     A[j,i] = 1
                 else:

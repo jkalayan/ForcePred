@@ -48,7 +48,7 @@ def run_force_pred(input_files='input_files',
         n_nodes='n_nodes', n_layers='n_layers', n_training='n_training', 
         n_val='n_val', n_test='n_test', grad_loss_w='grad_loss_w', 
         qFE_loss_w='qFE_loss_w', E_loss_w='E_loss_w', bias='bias',
-        filtered='filtered', load_model='load_model'):
+        filtered='filtered', load_model='load_model', dihedrals='dihedrals'):
 
 
     startTime = datetime.now()
@@ -155,22 +155,22 @@ def run_force_pred(input_files='input_files',
                         atom_pairs[ij], ave_rs_all[ij], pair_freq[ij], q_F[ij]))
             Plotter.xy_scatter([ave_rs_all], [pair_freq], [''], ['k'], 
                     '$<r_{ij}> / \AA$', 'pair_freq', [10], 
-                    'scatter-ave_r-pair_freq.png')
+                    'scatter-ave_r-pair_freq.pdf')
             Plotter.xy_scatter([ave_rs_all], [q_F], [''], ['k'], 
                     '$<r_{ij}> / \AA$', 'q / kcal/mol/$\AA$', [10], 
-                    'scatter-ave_r-q_F.png')
+                    'scatter-ave_r-q_F.pdf')
             sys.exit()
             '''
 
             print('\nPlot decompFE vs r and histogram of decompFE')
             Plotter.hist_1d([molecule.mat_FE], 'q / kcal/mol', 'P(q)', 
-                    'hist_q.png')
+                    'hist_q.pdf')
             interatomic_measures = Binner()
             interatomic_measures.get_bond_pop(molecule.coords, pairs)
             dists = interatomic_measures.rs.flatten()
             decompFE = molecule.mat_FE[:,:_NC2,].flatten()
             Plotter.xy_scatter([dists], [decompFE], [''], ['k'], '$r_{ij} / \AA$',
-                    'q / kcal/mol', [10], 'scatter-r-decompFE.png')
+                    'q / kcal/mol', [10], 'scatter-r-decompFE.pdf')
             sys.stdout.flush()
 
             print('\nRemove high magnitude decompFE structures')
@@ -248,10 +248,11 @@ def run_force_pred(input_files='input_files',
         dists = interatomic_measures.rs.flatten()
         decompFE = molecule.mat_FE[:,:_NC2,].flatten()
         Plotter.xy_scatter([dists], [decompFE], [''], ['k'], '$r_{ij} / \AA$',
-                'q / kcal/mol', [10], 'scatter-r-decompFE2.png')
-        Plotter.hist_1d([molecule.mat_FE], 'q / kcal/mol', 'P(q)', 'hist_q2.png')
+                'q / kcal/mol', [10], 'scatter-r-decompFE2.pdf')
+        Plotter.hist_1d([molecule.mat_FE], 'q / kcal/mol', 'P(q)', 'hist_q2.pdf')
         sys.stdout.flush()
 
+    '''
     network = Network(molecule)
     if load_model == None: 
         print('\nTrain ANN')
@@ -260,6 +261,122 @@ def run_force_pred(input_files='input_files',
                 n_nodes=n_nodes, n_layers=n_layers, grad_loss_w=grad_loss_w, 
                 qFE_loss_w=qFE_loss_w, E_loss_w=E_loss_w, bias=bias)
         sys.stdout.flush()
+    '''
+
+    dihs = True
+    if dihs:
+        print('dihedrals:', dihedrals)
+
+        molecule_md17 = Molecule() #initiate molecule class
+        NPParser(atom_file, 
+                [input_files[0]+'/coords.txt'], 
+                [input_files[0]+'/forces.txt'], 
+                [input_files[0]+'/energies.txt'], 
+                molecule_md17)
+
+        molecule_qm = Molecule() #initiate molecule class
+        NPParser(atom_file, 
+                [input_files[1]+'/coords.txt'], 
+                [input_files[1]+'/forces.txt'], 
+                [input_files[1]+'/energies.txt'], 
+                molecule_qm)
+
+        measures_md17 = Binner()
+        measures_md17.get_dih_pop(molecule_md17.coords, dihedrals)
+
+        measures_qm = Binner()
+        measures_qm.get_dih_pop(molecule_qm.coords, dihedrals)
+
+        Plotter.hist_2d([measures_qm.phis.T[0], measures_md17.phis.T[0]], 
+                [measures_qm.phis.T[1], measures_md17.phis.T[1]], 
+                ['Reds', 'Greys'],
+                '$\\tau_1$ (degrees)', '$\\tau_2$ (degrees)', 
+                'hist2d-dihs-qm-md17.pdf')
+
+        Plotter.hist_2d([measures_md17.phis.T[0]], 
+                [measures_md17.phis.T[1]], 
+                ['Greys'], '$\\tau_1$ (degrees)', '$\\tau_2$ (degrees)', 
+                'hist2d-dihs-md17.pdf')
+
+
+        Plotter.hist_2d([measures_qm.phis.T[0]], 
+                [measures_qm.phis.T[1]], 
+                ['Reds'], '$\\tau_1$ (degrees)', '$\\tau_2$ (degrees)', 
+                'hist2d-dihs-qm.pdf')
+
+
+    sim = True
+    if sim:
+        # ML simulation, get time where geometries become
+        # unstable and print out these times.
+        molecule_sim = Molecule() #initiate molecule class
+
+        if dihs:
+            NPParser(atom_file, 
+                    [input_files[2]+'/openmm-coords.txt'], 
+                    [input_files[2]+'/openmm-forces.txt'], 
+                    [input_files[2]+'/openmm-delta_energies.txt'], 
+                    molecule_sim)
+        else:
+            NPParser(atom_file, 
+                    [input_files[0]+'/openmm-coords.txt'], 
+                    [input_files[0]+'/openmm-forces.txt'], 
+                    [input_files[0]+'/openmm-delta_energies.txt'], 
+                    molecule_sim)
+
+
+        adjacency_mat = Molecule.find_bonded_atoms(molecule_sim.atoms,
+                molecule_sim.coords[0])
+        print('A', adjacency_mat)
+        #A_flat = np.tril(adjacency_mat) #lower tri for A
+        #print('A_flat', A_flat)
+
+        atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) 
+                for z, n in zip(molecule_sim.atoms, 
+                range(1,len(molecule_sim.atoms)+1))]
+        for i in range(len(molecule_sim.atoms)):
+            print(i, atom_names[i])
+        print()
+        pairs = []
+        _N = 0
+        for i in range(len(molecule_sim.atoms)):
+            for j in range(i):
+                if adjacency_mat[i,j] == 1:
+                    print(_N, atom_names[i], atom_names[j])
+                    pairs.append([i, j])
+                _N += 1
+        print()
+
+        sim_interatomic_measures = Binner()
+        sim_interatomic_measures.get_bond_pop(
+                molecule_sim.coords, pairs)
+        print(sim_interatomic_measures.rs.shape)
+
+        delta_r = 0.5
+        dt = 5 #5_000 #fs 
+        fs_to_ns = 1e6
+        print('delta_r', delta_r, 'dt', dt)
+        for i in range(len(sim_interatomic_measures.rs)):
+            diff_r = (sim_interatomic_measures.rs[i] - 
+                    sim_interatomic_measures.rs[0])
+            max_t = (i * dt) / fs_to_ns
+            if max(diff_r) > delta_r:
+                max_t = (i * dt) / fs_to_ns
+                break
+        print(i, max_t)
+
+        if dihs:
+            measures_sim = Binner()
+            measures_sim.get_dih_pop(molecule_sim.coords[:i], dihedrals)
+            Plotter.hist_2d([measures_md17.phis.T[0], measures_sim.phis.T[0]], 
+                    [measures_md17.phis.T[1], measures_sim.phis.T[1]], 
+                    ['Greys', 'Reds'],
+                    '$\\tau_1$ (degrees)', '$\\tau_2$ (degrees)', 
+                    'hist2d-dihs-md17-sim.pdf')
+
+            
+
+
 
     if load_model != None:
         #model = load_model('best_ever_model_6')
@@ -311,7 +428,7 @@ def run_force_pred(input_files='input_files',
                     test_prediction_E.flatten(), 'testset_hist_E.dat')
             Plotter.plot_2d([bin_edges], [hist], [''], 
                     'Error', '% of points below error', 
-                    'testset_s_curve_E.png', log=True)
+                    'testset_s_curve_E.pdf', log=True)
             ind = [math.floor(i) for i in bin_edges].index(1)
             L1 = hist[ind]
             print('E ind bin L1', ind, bin_edges[ind], L1)
@@ -319,7 +436,7 @@ def run_force_pred(input_files='input_files',
                     test_prediction_F.flatten(), 'testset_hist_F.dat')
             Plotter.plot_2d([bin_edges], [hist], [''], 
                     'Error', '% of points below error', 
-                    'testset_s_curves_F.png', log=True)
+                    'testset_s_curves_F.pdf', log=True)
             ind = [math.floor(i) for i in bin_edges].index(1)
             L1 = hist[ind]
             print('F ind bin L1', ind, bin_edges[ind], L1)
@@ -328,43 +445,52 @@ def run_force_pred(input_files='input_files',
                     'testset_hist_decompFE.dat')
             Plotter.plot_2d([bin_edges], [hist], [''], 
                     'Error', '% of points below error', 
-                    'testset_s_curves_decompFE.png', log=True)
+                    'testset_s_curves_decompFE.pdf', log=True)
             ind = [math.floor(i) for i in bin_edges].index(1)
             L1 = hist[ind]
             print('qFE ind bin L1', ind, bin_edges[ind], L1)
 
-        cp2k_ = True
+            
+        cp2k_ = False
         if cp2k_:
             ##### CP2K DATA
             print('\n\n******** CP2K DATA *********')
-            molecule_cp2k = Molecule() #initiate molecule class
-            cp2k_path = input_files[0]+'/cp2k_parsed'
-            NPParser(atom_file, [cp2k_path+'/C.txt'], [cp2k_path+'/F.txt'], 
-                    [cp2k_path+'/E.txt'], molecule_cp2k)
+            #molecule_cp2k = Molecule() #initiate molecule class
+            #cp2k_path = input_files[0]+'/cp2k_parsed'
+            #NPParser(atom_file, [cp2k_path+'/C.txt'], [cp2k_path+'/F.txt'], 
+                    #[cp2k_path+'/E.txt'], molecule_cp2k)
             #Writer.write_gaus_cart(molecule_cp2k.coords,#[0].reshape(1,-1,3), 
                     #molecule_cp2k.atoms, '', 'cp2k_all')
 
-            # cp2k sims in soln
-            #molecule_cp2k = Molecule() #initiate molecule class
-            #OPTParser([input_files[0]+'/gaus_files2/cp2k_all.out'], molecule_cp2k, 
-                    #opt=False) #read in FCEZ for SP
+            # cp2k sims in soln or re-done md17 
+            molecule_cp2k = Molecule() #initiate molecule class
+            OPTParser(
+                    [input_files[0]+'/gaus_files2/cp2k_all.out'], 
+                    #[input_files[0]+'/gaus_md17/cp2k_all.out'], 
+                    molecule_cp2k, 
+                    opt=False) #read in FCEZ for SP
 
-            #'''
+            '''
             # md17 dataset
             molecule = Molecule() #initiate molecule class
             NPParser(atom_file, coord_files, force_files, energy_files, 
                     molecule)
+
+            Writer.write_xyz(molecule.coords, molecule.atoms, 'md17_all.xyz', 
+                    'w')
 
             if n_test == -1 or n_test > len(molecule.coords):
                 n_test = len(molecule.coords) - n_training
             print('\nDefine training and test sets')
             train_split = math.ceil(len(molecule.coords) / n_training)
             print('train_split', train_split)
-            molecule.train = np.arange(0, len(molecule.coords), train_split).tolist() 
+            molecule.train = np.arange(0, len(molecule.coords), 
+                    train_split).tolist() 
             val_split = math.ceil(len(molecule.train) / n_val)
             print('val_split', val_split)
             molecule.val = molecule.train[::val_split]
-            molecule.train2 = [x for x in molecule.train if x not in molecule.val]
+            molecule.train2 = [x for x in molecule.train if x not in 
+                    molecule.val]
             molecule.test = [x for x in range(0, len(molecule.coords)) 
                     if x not in molecule.train]
             if n_test > len(molecule.test):
@@ -380,13 +506,40 @@ def run_force_pred(input_files='input_files',
                 len(molecule.train2), len(molecule.val), len(molecule.test)))
             sys.stdout.flush()
 
+            molecule.coords = np.take(molecule.coords, molecule.test, axis=0)
+            molecule.forces = np.take(molecule.forces, molecule.test, axis=0)
+            molecule.energies = np.take(molecule.energies, molecule.test, axis=0)
+            
+
+            mae, rms, msd = Binner.get_error(
+                    molecule.energies[:len(molecule_cp2k.coords)].flatten(), 
+                    molecule_cp2k.energies.flatten())
+            print('\n{} testset structures, errors for E / kcal/mol:- '\
+                    '\nMAE: {:.3f} '\
+                    '\nRMS: {:.3f} \nMSD: {:.3f} '\
+                    '\nMSE: {:.3f}'.format(
+                    len(molecule_cp2k.energies), mae, rms, msd, rms**2))
+
+            mae, rms, msd = Binner.get_error(
+                    molecule.forces[:len(molecule_cp2k.coords)].flatten(), 
+                    molecule_cp2k.forces.flatten())
+            print('\n{} testset structures, errors for gradient (F) / '\
+                    'kcal/mol/$\AA$:- '\
+                    '\nMAE: {:.3f} \nRMS: {:.3f} '\
+                    '\nMSD: {:.3f} \nMSE: {:.3f}'.format(
+                    len(molecule_cp2k.forces), mae, rms, msd, rms**2))
+
+
+
+            sys.exit()
+
             molecule_cp2k.coords = np.take(molecule.coords, molecule.test, axis=0)
             molecule_cp2k.forces = np.take(molecule.forces, molecule.test, axis=0)
             molecule_cp2k.energies = np.take(molecule.energies, molecule.test, axis=0)
             
             Writer.write_gaus_cart(molecule_cp2k.coords,#[0].reshape(1,-1,3), 
                     molecule_cp2k.atoms, '', 'cp2k_all')
-            #'''
+            '''
 
             n_atoms = len(molecule_cp2k.atoms)
             atoms = np.array([float(i) for i in molecule_cp2k.atoms], 
@@ -408,7 +561,7 @@ def run_force_pred(input_files='input_files',
                     test_prediction_E.flatten(), 'testset_hist_E.dat')
             Plotter.plot_2d([bin_edges], [hist], [''], 
                     'Error', '% of points below error', 
-                    'testset_s_curve_E.png', log=True)
+                    'testset_s_curve_E.pdf', log=True)
             try:
                 ind = [math.floor(i) for i in bin_edges].index(1)
             except ValueError:
@@ -423,7 +576,7 @@ def run_force_pred(input_files='input_files',
                     test_prediction_F.flatten(), 'testset_hist_F.dat')
             Plotter.plot_2d([bin_edges], [hist], [''], 
                     'Error', '% of points below error', 
-                    'testset_s_curves_F.png', log=True)
+                    'testset_s_curves_F.pdf', log=True)
             try:
                 ind = [math.floor(i) for i in bin_edges].index(1)
             except ValueError:
@@ -453,7 +606,7 @@ def run_force_pred(input_files='input_files',
 
 
 
-            '''
+            #'''
             ## plot interatomic distances for cp2k sims and ML/MM sims in soln
 
             molecule_mlmm = Molecule() #initiate molecule class
@@ -463,15 +616,24 @@ def run_force_pred(input_files='input_files',
                     [mlmm_path+'/openmm-delta_energies.txt'], molecule_mlmm)
 
 
-
             molecule_md17 = Molecule() #initiate molecule class
             NPParser(atom_file, coord_files, force_files, energy_files, 
                     molecule_md17)
 
+        
+            atom_names = ['{}{}'.format(Converter._ZSymbol[z], n) 
+                    for z, n in zip(molecule_cp2k.atoms, 
+                    range(1,len(molecule_cp2k.atoms)+1))]
+            for i in range(len(molecule_cp2k.atoms)):
+                print(i, atom_names[i])
+            print()
             pairs = []
+            _N = 0
             for i in range(len(molecule_cp2k.atoms)):
                 for j in range(i):
+                    print(_N, atom_names[i], atom_names[j])
                     pairs.append([i, j])
+                    _N += 1
 
 
             cp2k_interatomic_measures = Binner()
@@ -485,6 +647,27 @@ def run_force_pred(input_files='input_files',
             md17_interatomic_measures = Binner()
             md17_interatomic_measures.get_bond_pop(
                     molecule_md17.coords[::10], pairs)
+
+
+            idx = 31 #53
+            info = [[
+                        cp2k_interatomic_measures.rs.T[idx].flatten(),
+                        #mlmm_interatomic_measures.rs.T[idx].flatten(), 
+                        md17_interatomic_measures.rs.T[idx].flatten(), 
+                        100, '$r / \AA$', '{}'.format(idx)]
+                    ]
+
+            for i in info:
+                bin_edges, hist = Binner.get_hist(i[0], i[2])
+                bin_edges2, hist2 = Binner.get_hist(i[1], i[2])
+                Plotter.xy_scatter(
+                        [bin_edges2, bin_edges], 
+                        [hist2, hist], 
+                        ['DFT', 'ML'], ['k', 'r'], i[3], 
+                        'P($r$)', [10, 10],
+                        'hist-cp2k-md17-r-{}.pdf'.format(i[4]))
+
+
 
             info = [[
                         cp2k_interatomic_measures.rs.T.flatten(),
@@ -501,7 +684,24 @@ def run_force_pred(input_files='input_files',
                         [hist2, hist], 
                         ['DFT', 'ML'], ['k', 'r'], i[3], 
                         'P($r$)', [10, 10],
-                        'hist-cp2k-mlmm-r-{}.png'.format(i[4]))
+                        'hist-cp2k-mlmm-r-{}.pdf'.format(i[4]))
+
+            info = [[
+                        #cp2k_interatomic_measures.rs.T.flatten(),
+                        md17_interatomic_measures.rs.T.flatten(), 
+                        mlmm_interatomic_measures.rs.T.flatten(), 
+                        1000, '$r_{ij} / \AA$', 'all']
+                    ]
+
+            for i in info:
+                bin_edges, hist = Binner.get_hist(i[0], i[2])
+                bin_edges2, hist2 = Binner.get_hist(i[1], i[2])
+                Plotter.xy_scatter(
+                        [bin_edges2, bin_edges], 
+                        [hist2, hist], 
+                        ['DFT', 'ML'], ['k', 'r'], i[3], 
+                        'P($r_{ij}$)', [10, 10],
+                        'hist-md17-mlmm-r-{}.pdf'.format(i[4]))
 
 
 
@@ -509,7 +709,7 @@ def run_force_pred(input_files='input_files',
                         cp2k_interatomic_measures.rs.T.flatten(),
                         mlmm_interatomic_measures.rs.T.flatten(), 
                         md17_interatomic_measures.rs.T.flatten(), 
-                        1000, '$r / \AA$', 'all']
+                        1000, '$r /$ \AA', 'all']
                     ]
 
             for i in info:
@@ -521,8 +721,8 @@ def run_force_pred(input_files='input_files',
                         [hist2, hist, hist3], 
                         ['DFT', 'ML', 'MD17'], ['k', 'r', 'dodgerblue'], i[4], 
                         'P($r$)', [10, 10, 10],
-                        'hist-cp2k-mlmm-md17-r-{}.png'.format(i[5]))
-            '''
+                        'hist-cp2k-mlmm-md17-r-{}.pdf'.format(i[5]))
+            #'''
 
 
     print(datetime.now() - startTime)
@@ -599,6 +799,9 @@ def main():
                 action='store', default=None,
                 help='load an existing network to perform MD, provide '\
                         'the path+folder to model here')
+        group = parser.add_argument('-d', '--dihedrals', nargs='+', 
+                action='append', type=int, default=[],
+                help='list of dihedrals')
         op = parser.parse_args()
     except argparse.ArgumentError:
         logging.error('Command line arguments are ill-defined, '
@@ -613,7 +816,8 @@ def main():
             n_layers=op.n_layers, n_training=op.n_training, n_val=op.n_val, 
             n_test=op.n_test, grad_loss_w=op.grad_loss_w, 
             qFE_loss_w=op.qFE_loss_w, E_loss_w=op.E_loss_w, bias=op.bias,
-            filtered=op.filtered, load_model=op.load_model)
+            filtered=op.filtered, load_model=op.load_model, 
+            dihedrals=op.dihedrals)
 
 if __name__ == '__main__':
     main()
