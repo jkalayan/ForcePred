@@ -109,10 +109,10 @@ class Plotter(object):
                 )
         plt.close(plt.gcf())
 
-    def hist_1d(x_list, xlabel, ylabel, plot_name):
+    def hist_1d(x_list, xlabel, ylabel, plot_name, color_list=['k']):
         fig, ax = plt.subplots(figsize=(10, 10), 
                 edgecolor='k') #all in one plot
-        for x in x_list:
+        for x, c in zip(x_list, color_list):
             x_min, x_max = np.min(x), np.max(x)
             x_diff = int(x_max-x_min)
             sc = ax.hist(x=x,
@@ -122,7 +122,7 @@ class Plotter(object):
                     #range=[[x_min, x_max]], 
                     #alpha=0.5, 
                     facecolor='None',
-                    edgecolor='k',
+                    edgecolor=c, #'k',
                     linewidth=2,
                     )
         Plotter.format(ax, x, x, xlabel, ylabel)

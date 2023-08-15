@@ -77,7 +77,8 @@ def run_force_pred(input_files='input_files',
             #'malonaldehyde'
 
     #cp2k_path = base_path+'/cp2k_500K_100ps/1'
-    atom_order_file = base_path+'/revised_data/atom_order.txt'
+    #atom_order_file = base_path+'/revised_data/atom_order.txt'
+    atom_order_file = base_path2+'/revised_data/cp2k-derivative-atom-orders.txt'
     atoms = base_path2+'/revised_data/nuclear_charges.txt'
     sys.stdout.flush()
 

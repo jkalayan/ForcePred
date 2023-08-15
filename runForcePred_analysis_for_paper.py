@@ -263,7 +263,7 @@ def run_force_pred(input_files='input_files',
         sys.stdout.flush()
     '''
 
-    dihs = True
+    dihs = False
     if dihs:
         print('dihedrals:', dihedrals)
 
@@ -305,7 +305,16 @@ def run_force_pred(input_files='input_files',
                 'hist2d-dihs-qm.pdf')
 
 
-    sim = True
+        Plotter.hist_1d([measures_qm.phis.T[0], measures_md17.phis.T[0]], 
+                '$\\tau_1$ (degrees)', 'P($\\tau_1$)', 
+                'hist1d-dih1-qm-md17.pdf', color_list=['r', 'k'])
+
+        Plotter.hist_1d([measures_qm.phis.T[1], measures_md17.phis.T[1]], 
+                '$\\tau_2$ (degrees)', 'P($\\tau_2$)', 
+                'hist1d-dih2-qm-md17.pdf', color_list=['r', 'k'])
+
+
+    sim = False
     if sim:
         # ML simulation, get time where geometries become
         # unstable and print out these times.
@@ -379,6 +388,7 @@ def run_force_pred(input_files='input_files',
 
 
     if load_model != None:
+        network = Network(molecule)
         #model = load_model('best_ever_model_6')
         model = Network.get_coord_FE_model(network, molecule, prescale,
                 training_model=False, load_model=load_model)
@@ -451,17 +461,32 @@ def run_force_pred(input_files='input_files',
             print('qFE ind bin L1', ind, bin_edges[ind], L1)
 
             
-        cp2k_ = False
+        cp2k_ = True
         if cp2k_:
             ##### CP2K DATA
             print('\n\n******** CP2K DATA *********')
-            #molecule_cp2k = Molecule() #initiate molecule class
+            molecule_cp2k = Molecule() #initiate molecule class
             #cp2k_path = input_files[0]+'/cp2k_parsed'
+            #cp2k_path = input_files[0]+'/cp2k_parsed_all'
             #NPParser(atom_file, [cp2k_path+'/C.txt'], [cp2k_path+'/F.txt'], 
                     #[cp2k_path+'/E.txt'], molecule_cp2k)
             #Writer.write_gaus_cart(molecule_cp2k.coords,#[0].reshape(1,-1,3), 
                     #molecule_cp2k.atoms, '', 'cp2k_all')
 
+            # for cp2k redone in Gaussian
+            cp2k_path = input_files[0]+'/aq-rMD17_gauss'
+            NPParser(atom_file, [cp2k_path+'/coords.txt'], 
+                    [cp2k_path+'/forces.txt'], 
+                    [cp2k_path+'/energies.txt'], molecule_cp2k)
+
+            # if N structures in molecule_cp2k == 100,000 then reduce to
+            # 20,000 for quicker analysis
+            if len(molecule_cp2k.coords) >= 100_000:
+                molecule_cp2k.coords = molecule_cp2k.coords[::5]
+                molecule_cp2k.energies = molecule_cp2k.energies[::5]
+                molecule_cp2k.forces = molecule_cp2k.forces[::5]
+
+            '''
             # cp2k sims in soln or re-done md17 
             molecule_cp2k = Molecule() #initiate molecule class
             OPTParser(
@@ -469,6 +494,7 @@ def run_force_pred(input_files='input_files',
                     #[input_files[0]+'/gaus_md17/cp2k_all.out'], 
                     molecule_cp2k, 
                     opt=False) #read in FCEZ for SP
+            '''
 
             '''
             # md17 dataset

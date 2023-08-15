@@ -281,8 +281,10 @@ def run_force_pred(input_files='input_files',
             dtype=None)
     L1_F = np.genfromtxt(file_path+'/L1_F_m100_m121.csv', delimiter=',', 
             dtype=None)
-    stability_t = np.genfromtxt(file_path+'/stability_long_sims_m100.csv', 
-            delimiter=',', dtype=None)
+    stability = False
+    if stability:
+        stability_t = np.genfromtxt(file_path+'/stability_long_sims_m100.csv', 
+                delimiter=',', dtype=None)
 
 
     headers = list(E[1:,0].astype(str))
@@ -290,13 +292,14 @@ def run_force_pred(input_files='input_files',
     F = F[1:,1:].astype('float64')
     L1_E = L1_E[1:,1:].astype('float64')
     L1_F = L1_F[1:,1:].astype('float64')
-    stability = stability_t[1:,1:].astype('float64')
+    if stability:
+        stability = stability_t[1:,1:].astype('float64')
     print(headers)
     print(E)
 
-    val_idx = 0 #0, 2
-    stdev_idx = 1 #1, 3
-    max_val = 2 #2, 4
+    val_idx = 2 #0, 2
+    stdev_idx = 3 #1, 3
+    max_val = 4 #2, 4
     Plotter.twinx_error_bars_plot([list(range(1,len(headers)+1))]*2, 
             [E.T[val_idx], L1_E.T[val_idx]], 
             [E.T[stdev_idx], L1_E.T[stdev_idx]], ['']*2, 
@@ -311,7 +314,8 @@ def run_force_pred(input_files='input_files',
             '', 'Force MAE / kcal/mol/$\mathrm{\AA}$', 'L1 / %', [100]*2, [1,2], 
             None, 'F.pdf', x_ticks_labels=headers, max_val=max_val)
 
-    Plotter.error_bars_plot([list(range(1,len(headers)+1))], 
+    if stability:
+        Plotter.error_bars_plot([list(range(1,len(headers)+1))], 
             [stability.T[val_idx]], [stability.T[stdev_idx]], [''], 
             ['b'], [':'], ['o'], '', 'Time / ns', [100], 
             None, 'stability.pdf', x_ticks_labels=headers, max_val=52)
