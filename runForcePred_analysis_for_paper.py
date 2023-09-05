@@ -314,7 +314,7 @@ def run_force_pred(input_files='input_files',
                 'hist1d-dih2-qm-md17.pdf', color_list=['r', 'k'])
 
 
-    sim = False
+    sim = True
     if sim:
         # ML simulation, get time where geometries become
         # unstable and print out these times.
@@ -461,7 +461,7 @@ def run_force_pred(input_files='input_files',
             print('qFE ind bin L1', ind, bin_edges[ind], L1)
 
             
-        cp2k_ = True
+        cp2k_ = False
         if cp2k_:
             ##### CP2K DATA
             print('\n\n******** CP2K DATA *********')

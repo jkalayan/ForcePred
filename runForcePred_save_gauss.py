@@ -57,14 +57,14 @@ def run_force_pred(input_files='input_files',
     print(startTime)
 
 
-    '''
+    #'''
     # PART 1: TO OUTPUT SEPERATE GAUSSIAN .COM FILES
     # write out structures from cp2k sims to Gaussian format geom files.
     molecule = Molecule() #initiate molecule class
     NPParser(atom_file, coord_files, [], [], molecule)
 
     start = 0
-    steps = 2000
+    steps = 2000 #1 # For CP2K sims use -> #2000
     n_files = int(len(molecule.coords) / steps)
     for i in range(n_files):
         end = start + steps
@@ -73,10 +73,10 @@ def run_force_pred(input_files='input_files',
         start += steps
 
     sys.stdout.flush()
-    '''
+    #'''
 
     #print(input_files)
-    #''' 
+    ''' 
     # PART 2: Once Gaussian calcs have been performed, save them in np format
     # read in Gaussian output files and save coords, forces, energies and
     # charges into numpy txt files
@@ -92,7 +92,7 @@ def run_force_pred(input_files='input_files',
     np.savetxt('energies.txt', molecule.energies.reshape(-1,1))
     np.savetxt('charges.txt', molecule.charges.reshape(-1,n_atoms))
     sys.stdout.flush()
-    #'''
+    '''
 
     print(datetime.now() - startTime)
 
