@@ -498,7 +498,7 @@ class Plotter(object):
 
     def xy_scatter(x_list, y_list, label_list, color_list, 
             xlabel, ylabel, size_list, plot_name, log=False):
-        fig, ax = plt.subplots(figsize=(10, 10), 
+        fig, ax = plt.subplots(figsize=(20, 10), 
                 edgecolor='k') #all in one plot
         lines = []
         for x, y, size, label, c in zip(x_list, y_list, size_list, 
@@ -509,6 +509,35 @@ class Plotter(object):
                     )
             # line2 = ax.plot(x, y, lw=3, linestyle='dashed')
             lines.append(line)
+
+            # plot a fitted line through points
+            func = "f"
+            if func:
+                ls = "dashed"
+                x2, inds = np.unique(x, return_index=True)
+                x_unique = x[inds].squeeze()
+                y_unique = y[inds].squeeze()
+                print(x_unique.shape, y_unique.shape)
+                xnew = np.linspace(x_unique.min(), x_unique.max(), 1000)
+                f_smooth = interp1d(x_unique, y_unique, kind=2)
+                poly = np.polyfit(x_unique,y_unique,5)
+                poly_y = np.poly1d(poly)(xnew)
+                if func == 'f':
+                    curve = f_smooth(xnew)
+                    #poly = np.polyfit(x_unique,y_unique,27)
+                    #poly_y = np.poly1d(poly)(xnew)
+                    #curve = poly_y
+                if func  == 'p':
+                    curve = poly_y
+                line2 = ax.plot(xnew, 
+                        #f_smooth(xnew), 
+                        curve, 
+                        c=c, lw=2, ls=ls,
+                        #label=label
+                        )
+
+
+
         Plotter.format(ax, x, y, xlabel, ylabel)
         if log:
             ax.set_xscale('log')
