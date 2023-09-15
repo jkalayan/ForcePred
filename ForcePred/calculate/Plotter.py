@@ -160,7 +160,8 @@ class Plotter(object):
             sc = ax.hist2d(x=x, y=y,
                     bins=90,
                     #bins=[x_diff, y_diff], 
-                    range=[[x_min, x_max], [y_min, y_max]], 
+                    #range=[[x_min, x_max], [y_min, y_max]], 
+                    range=[[-180, 180], [-50, 50]], 
                     alpha=1, 
                     #marker='s', 
                     #s=17, edgecolor='k', linewidth=0.1,
@@ -506,6 +507,7 @@ class Plotter(object):
                     s=size, facecolors=c, #'none', 
                     edgecolors=c, #lw=2,
                     )
+            # line2 = ax.plot(x, y, lw=3, linestyle='dashed')
             lines.append(line)
         Plotter.format(ax, x, y, xlabel, ylabel)
         if log:
@@ -546,4 +548,102 @@ class Plotter(object):
                 bbox_inches='tight',
                 )
         plt.close(plt.gcf())
-        
+
+    def plot_violin(x_list, x_list2, label_list, xlabel, ylabel, plot_name):
+        """
+        """
+        vert = False
+        if vert:
+            fig, ax = plt.subplots(figsize=(20, 10), 
+                    edgecolor='k') #all in one plot
+        else:
+            fig, ax = plt.subplots(figsize=(10, 20), 
+                    edgecolor='k') #all in one plot
+            x_list = x_list[::-1]          
+            x_list2 = x_list2[::-1]          
+            label_list = label_list[::-1]          
+
+        sc1 = ax.violinplot(x_list, #list of vals
+                            vert=vert,
+                            widths=0.95, #width of each violin dist
+                            showextrema=False, #remove min/max line
+                        )
+
+        for pc in sc1["bodies"]:
+            # plt.colors.to_rgba(c, alpha=None)
+            pc.set_facecolor("red")
+            #pc.set_edgecolor("red")
+            pc.set_alpha(0.8)
+            #pc.set_linewidth(3) 
+            if vert:
+                # for vertical plots
+                paths = pc.get_paths()[0]
+                mean = np.mean(paths.vertices[:, 0])
+                paths.vertices[:, 0][paths.vertices[:, 0] <= mean] = mean
+                #pc.get_paths()[0].vertices[:, 0] = np.clip(pc.get_paths()[0].vertices[:, 0], -np.inf, mean)
+            else:
+                # for horizontal plots
+                paths = pc.get_paths()[0]
+                mean = np.mean(paths.vertices[:, 1])
+                paths.vertices[:, 1][paths.vertices[:, 1] <= mean] = mean
+                # pc.get_paths()[0].vertices[:, 1] = np.clip(pc.get_paths()[0].vertices[:, 1], mean, np.inf)                
+
+
+        sc2 = ax.violinplot(x_list2, #list of vals
+                            vert=vert,
+                            widths=0.95, #width of each violin dist
+                            showextrema=False, #remove min/max line
+                        )
+        for pc in sc2["bodies"]:
+            pc.set_facecolor("tab:blue")
+            #pc.set_edgecolor("tab:blue")
+            pc.set_alpha(0.8)
+            #pc.set_linewidth(3) 
+            if vert:
+                # for vertical plots
+                paths = pc.get_paths()[0]
+                mean = np.mean(paths.vertices[:, 0])
+                paths.vertices[:, 0][paths.vertices[:, 0] <= mean] = mean
+                #pc.get_paths()[0].vertices[:, 0] = np.clip(pc.get_paths()[0].vertices[:, 0], mean, np.inf)
+            else:
+                # for horizontal plots
+                paths = pc.get_paths()[0]
+                mean = np.mean(paths.vertices[:, 1])
+                paths.vertices[:, 1][paths.vertices[:, 1] <= mean] = mean
+                #pc.get_paths()[0].vertices[:, 1] = np.clip(pc.get_paths()[0].vertices[:, 1], -np.inf, mean)                
+
+
+        Plotter.format(ax, x_list[0], x_list2[0], ylabel, xlabel)
+
+
+        if vert:
+            ax.set_xticks(np.arange(1, len(label_list) + 1), labels=label_list, 
+                        rotation='vertical'
+                        )
+            ax.set_xlim(0.25, len(label_list) + 0.75)
+            # ax.set_xlabel('Sample name')
+            ax.grid(color='grey', linestyle='--', which='major', 
+                axis='y', linewidth=1)
+        else:
+            ax.set_yticks(np.arange(1, len(label_list) + 1), labels=label_list, 
+                        #rotation='vertical'
+                        )
+            ax.set_ylim(0.25, len(label_list) + 0.75)
+            ax.yaxis.tick_right()
+            ax.yaxis.set_label_position("right")
+
+            ax.grid(color='grey', linestyle='--', which='major', 
+                axis='x', linewidth=1)
+
+            #ax.yaxis.tick_right()
+            #ax.yaxis.set_label_position("right")
+            # plt.tick_params(axis='y', which='both', labelleft='off', labelright='on')
+            # ax.set_xlabel('Sample name')            
+
+
+
+        fig.savefig('%s' % (plot_name), 
+                #transparent=True, 
+                bbox_inches='tight'
+                )
+        plt.close(plt.gcf())

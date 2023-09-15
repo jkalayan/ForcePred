@@ -21,8 +21,8 @@ if mdanal:
     from ForcePred.read.AMBLAMMPSParser import AMBLAMMPSParser
     from ForcePred.read.AMBERParser import AMBERParser
                                
-from ForcePred import Molecule, OPTParser, NPParser, Converter, \
-        Permuter, XYZParser, Binner, Writer, Plotter, Conservation
+from ForcePred import Molecule, OPTParser, NPParser, Converter, Preprocess, \
+        Permuter, XYZParser, Binner, Writer, Plotter, MultiPlotter, Conservation
         #Network
 from ForcePred.nn.Network_shared_ws import Network
 from keras.models import Model, load_model    
@@ -41,7 +41,7 @@ tf.config.threading.set_intra_op_parallelism_threads(NUMCORES)
 tf.config.set_soft_device_placement(1)
 
 
-def run_force_pred(input_files='input_files', 
+def run_force_pred(input_files='input_files', input_paths='input_paths',
         atom_file='atom_file', coord_files='coord_files',
         force_files='force_files', energy_files='energy_files',
         charge_files='charge_files', list_files='list_files', 
@@ -52,12 +52,36 @@ def run_force_pred(input_files='input_files',
 
     startTime = datetime.now()
     print(startTime)
+
+
+
+    # salicylic acid scan
+    molecule = Molecule()
+    filepath2 = input_paths[1]
+    OPTParser([os.path.join(filepath2, "salicylic_10_3_scan.out")], molecule, opt=True) #read in FCEZ for SP
+    print(molecule)
+    measure = Binner()
+    measure.get_dih_pop(molecule.coords, [dihedrals[7]]) # [[9, 0, 1, 2]])
+    delta_es = molecule.energies - np.min(molecule.energies)
+    # print(measure.phis)
+    # print(delta_es)
+    Plotter.xy_scatter([measure.phis.T[0]], [delta_es], [''], ['k'], "$\phi / ^{\circ}$",
+                '$\Delta E$ / kcal/mol', [40], 'salicylic_scan.pdf')
+    sys.exit()
+
+
+
     mols = input_files
-    molecule_info = []
-    measures_info = []
-    for i in range(len(mols)):
-        filepath = os.path.join(f"/Users/jas.kalayan/OneDrive - Science and Technology Facilities Council/bryce-burton-postdoc/rMD17_benchmark/{mols[i]}")
-        md17path = os.path.join(filepath, "revised_data")
+    N = len(mols) # 2 # 
+    mols = mols[:N] # mols[-N:] # 
+    molecules_md17 = []
+    measures_md17 = []
+    molecules_qmmm = []
+    measures_qmmm = []
+    for i in range(N): #range(len(mols)):
+        print(mols[i])
+        filepath = input_paths[0]
+        md17path = os.path.join(filepath, f"{mols[i]}/revised_data")
         # print(os.listdir(md17path))
         molecule_md17 = Molecule()
         atom_file = os.path.join(md17path, "nuclear_charges.txt")
@@ -65,17 +89,95 @@ def run_force_pred(input_files='input_files',
         force_files = [os.path.join(md17path, "forces.txt")]
         energy_files = [os.path.join(md17path, "energies.txt")]
         NPParser(atom_file, coord_files, force_files, energy_files, molecule_md17)
-        measures_md17 = Binner()
-        measures_md17.get_dih_pop(molecule_md17.coords, [dihedrals[i]])
-        molecule_info.append(molecule_md17)
-        measures_info.append(measures_md17)
 
-    for i in range(len(mols)):
-        print(mols[i])
-        print(molecule_info[i])
-        print(len(measures_info[i].phis))
-        
-        
+        qmmmpath = os.path.join(filepath, f"{mols[i]}/gaus_files2/cp2k_all.out")
+        # print(os.listdir(qmmmpath))
+        molecule_qmmm = Molecule()
+        OPTParser([qmmmpath], molecule_qmmm, opt=False) #read in FCEZ for SP
+
+        if len(molecule_md17.coords) >= 99_000:
+            molecule_md17.coords = molecule_md17.coords[::5]
+            molecule_md17.energies = molecule_md17.energies[::5]
+            molecule_md17.forces = molecule_md17.forces[::5]
+        pairs = []
+        for j in range(len(molecule_md17.atoms)):
+            for k in range(j):
+                pairs.append([j, k])
+        _NC2 = len(pairs)
+        measure_md17 = Binner()
+        measure_md17.get_dih_pop(molecule_md17.coords, [dihedrals[i]])
+        measure_md17.get_bond_pop(molecule_md17.coords, pairs)
+        molecules_md17.append(molecule_md17)
+        measures_md17.append(measure_md17)
+
+        #Preprocess.preprocessFE(molecule_md17, n_training, n_val, n_test, bias)
+
+        # if len(molecule_qmmm.coords) >= 10_000:
+        #     molecule_qmmm.coords = molecule_qmmm.coords[::10]
+        #     molecule_qmmm.energies = molecule_qmmm.energies[::10]
+        #     molecule_qmmm.forces = molecule_qmmm.forces[::10]
+        measure_qmmm = Binner()
+        measure_qmmm.get_dih_pop(molecule_qmmm.coords, [dihedrals[i]])
+        measure_qmmm.get_bond_pop(molecule_qmmm.coords, pairs)
+        molecules_qmmm.append(molecule_qmmm)
+        measures_qmmm.append(measure_qmmm)
+        #Preprocess.preprocessFE(molecule_qmmm, n_training, n_val, n_test, bias)
+
+    # for i in range(len(mols)):
+        # print(mols[i])
+        # print(molecule_info[i])
+        # print(len(measures_info[i].phis))
+
+    # name_list = [mols[:len(mols)//2], mols[len(mols)//2:]]
+    # MultiPlotter.violin(mols, measures_md17)
+    
+    md17_dihs = []
+    md17_rs = []
+    md17_qs = []
+    qmmm_dihs = []
+    qmmm_rs = []
+    qmmm_qs = []
+    for i in range(N):
+        data = measures_md17[i]
+        x = data.phis.T[0]
+        # print(data.rs.shape)
+        dist_md17 = data.rs.flatten()
+        md17_dihs.append(x)
+        md17_rs.append(dist_md17)
+        #md17_qs.append(molecules_md17[i].mat_FE[:,:_NC2,].flatten())
+
+        data = measures_qmmm[i]
+        x = data.phis.T[0]
+        dist_qmmm = data.rs.flatten()
+        qmmm_dihs.append(x)
+        qmmm_rs.append(dist_qmmm)
+        #qmmm_qs.append(molecules_qmmm[i].mat_FE[:,:_NC2,].flatten())
+
+
+
+    Plotter.plot_violin(md17_dihs, qmmm_dihs, mols, "", "$\phi / ^{\circ}$", "dihs.pdf")
+    Plotter.plot_violin(md17_rs, qmmm_rs, mols, "", "$r_{ij} / \AA$", "rs.pdf")
+    # Plotter.plot_violin(md17_qs, qmmm_qs, mols, "", "$q_{ij}$ / kcal/mol", "decompFE.pdf")
+
+    # plot the 2D hist for both salicylic conformers
+    measure_sal_md17 = Binner()
+    measure_sal_md17.get_dih_pop(molecules_md17[7].coords, [[9,0,1,2], [0,1,2,3]])
+    measure_sal_qmmm = Binner()
+    measure_sal_qmmm.get_dih_pop(molecules_qmmm[7].coords, [[9,0,1,2], [0,1,2,3]])
+    print(measure_sal_md17.phis.shape)
+    print(measure_sal_qmmm.phis.shape)
+    Plotter.hist_2d([measure_sal_md17.phis.T[0], measure_sal_qmmm.phis.T[0]], 
+                [measure_sal_md17.phis.T[1], measure_sal_qmmm.phis.T[1]], 
+                ['Reds', 'Blues'],
+                '$\phi_1 / ^{\circ}$', '$\phi_2 / ^{\circ}$', 
+                'a-2dhist_dihs_salicylic.pdf')
+
+    Plotter.hist_2d([measure_sal_qmmm.phis.T[0], measure_sal_md17.phis.T[0]], 
+                [measure_sal_qmmm.phis.T[1], measure_sal_md17.phis.T[1]], 
+                ['Blues', 'Reds'],
+                '$\phi_1 / ^{\circ}$', '$\phi_2 / ^{\circ}$', 
+                'b-2dhist_dihs_salicylic.pdf')
+
 
     print(startTime)
     molecule = Molecule() #initiate molecule class
@@ -200,6 +302,7 @@ def run_force_pred(input_files='input_files',
                 'q / kcal/mol', [10], 'scatter-r-decompFE2.pdf')
         Plotter.hist_1d([molecule.mat_FE], 'q / kcal/mol', 'P(q)', 'hist_q2.pdf')
         sys.stdout.flush()
+
 
     '''
     network = Network(molecule)
@@ -716,6 +819,9 @@ def main():
                 metavar='file', default=[],
                 help='name of file/s containing forces '\
                 'coordinates and energies.')
+        group = parser.add_argument('-p', '--input_paths', nargs='+', 
+                metavar='file', default=[],
+                help='list of paths.')
         group = parser.add_argument('-a', '--atom_file', 
                 metavar='file', default=None,
                 help='name of file/s containing atom nuclear charges.')
@@ -784,7 +890,8 @@ def main():
         raise
         sys.exit(1)
 
-    run_force_pred(input_files=op.input_files, atom_file=op.atom_file, 
+    run_force_pred(input_files=op.input_files, input_paths=op.input_paths, 
+            atom_file=op.atom_file, 
             coord_files=op.coord_files, force_files=op.force_files, 
             energy_files=op.energy_files, charge_files=op.charge_files, 
             list_files=op.list_files, n_nodes=op.n_nodes, 
