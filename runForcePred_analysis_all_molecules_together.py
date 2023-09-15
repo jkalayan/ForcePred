@@ -54,7 +54,7 @@ def run_force_pred(input_files='input_files', input_paths='input_paths',
     print(startTime)
 
 
-
+    #"""
     # salicylic acid scan
     molecule = Molecule()
     filepath2 = input_paths[1]
@@ -67,8 +67,8 @@ def run_force_pred(input_files='input_files', input_paths='input_paths',
     # print(delta_es)
     Plotter.xy_scatter([measure.phis.T[0]], [delta_es], [''], ['k'], "$\phi / ^{\circ}$",
                 '$\Delta E$ / kcal/mol', [40], 'salicylic_scan.pdf')
-    sys.exit()
-
+    #sys.exit()
+    #"""
 
 
     mols = input_files
@@ -177,6 +177,14 @@ def run_force_pred(input_files='input_files', input_paths='input_paths',
                 ['Blues', 'Reds'],
                 '$\phi_1 / ^{\circ}$', '$\phi_2 / ^{\circ}$', 
                 'b-2dhist_dihs_salicylic.pdf')
+    
+    Plotter.hist_1d([measure_sal_md17.phis.T[0], measure_sal_qmmm.phis.T[0]], 
+                    '$\phi / ^{\circ}$', 'P($\phi$)', 'hist1d_salicylic.pdf',
+                    color_list=["r", "tab:blue"])
+    Plotter.plot_violin([measure_sal_md17.phis.T[0]], 
+                        [measure_sal_qmmm.phis.T[0]], 
+                        [""], "salicylic", "$\phi / ^{\circ}$", "violin1d_salicylic.pdf")
+    
 
 
     print(startTime)

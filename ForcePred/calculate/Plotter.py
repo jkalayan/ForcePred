@@ -12,6 +12,7 @@ import matplotlib.colors as colors
 from scipy.interpolate import interp1d
 from scipy.stats import gaussian_kde #density
 from matplotlib import ticker
+from scipy import interpolate
 
 class Plotter(object):
     '''
@@ -498,7 +499,9 @@ class Plotter(object):
 
     def xy_scatter(x_list, y_list, label_list, color_list, 
             xlabel, ylabel, size_list, plot_name, log=False):
-        fig, ax = plt.subplots(figsize=(20, 10), 
+        fig, ax = plt.subplots(
+                #figsize=(10, 10), 
+                figsize=(20, 10),
                 edgecolor='k') #all in one plot
         lines = []
         for x, y, size, label, c in zip(x_list, y_list, size_list, 
@@ -511,7 +514,7 @@ class Plotter(object):
             lines.append(line)
 
             # plot a fitted line through points
-            func = "f"
+            func = "f" # False #
             if func:
                 ls = "dashed"
                 x2, inds = np.unique(x, return_index=True)
@@ -539,6 +542,8 @@ class Plotter(object):
 
 
         Plotter.format(ax, x, y, xlabel, ylabel)
+        ax.grid(color='grey', linestyle='--', which='major', 
+                axis='x', linewidth=1)
         if log:
             ax.set_xscale('log')
         #lgd = Plotter.get_legend(ax, lines, label_list)
@@ -586,7 +591,9 @@ class Plotter(object):
             fig, ax = plt.subplots(figsize=(20, 10), 
                     edgecolor='k') #all in one plot
         else:
-            fig, ax = plt.subplots(figsize=(10, 20), 
+            fig, ax = plt.subplots(
+                    #figsize=(10, 20), # all molecules
+                    figsize=(20, 10), 
                     edgecolor='k') #all in one plot
             x_list = x_list[::-1]          
             x_list2 = x_list2[::-1]          
