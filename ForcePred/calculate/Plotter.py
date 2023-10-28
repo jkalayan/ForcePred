@@ -162,7 +162,7 @@ class Plotter(object):
                     bins=90,
                     #bins=[x_diff, y_diff], 
                     #range=[[x_min, x_max], [y_min, y_max]], 
-                    range=[[-180, 180], [-50, 50]], 
+                    #range=[[-180, 180], [-50, 50]], 
                     alpha=1, 
                     #marker='s', 
                     #s=17, edgecolor='k', linewidth=0.1,
@@ -500,8 +500,8 @@ class Plotter(object):
     def xy_scatter(x_list, y_list, label_list, color_list, 
             xlabel, ylabel, size_list, plot_name, log=False):
         fig, ax = plt.subplots(
-                #figsize=(10, 10), 
-                figsize=(20, 10),
+                figsize=(10, 10), 
+                #figsize=(20, 10),
                 edgecolor='k') #all in one plot
         lines = []
         for x, y, size, label, c in zip(x_list, y_list, size_list, 
@@ -514,7 +514,7 @@ class Plotter(object):
             lines.append(line)
 
             # plot a fitted line through points
-            func = "f" # False #
+            func = False # "f" # 
             if func:
                 ls = "dashed"
                 x2, inds = np.unique(x, return_index=True)
@@ -583,8 +583,12 @@ class Plotter(object):
                 )
         plt.close(plt.gcf())
 
-    def plot_violin(x_list, x_list2, label_list, xlabel, ylabel, plot_name):
+    def plot_violin(x_list, x_list2, label_list, color_list, xlabel, ylabel, 
+                plot_name):
         """
+        x_list is a list of lists, for x values for each molecule
+
+        https://matplotlib.org/stable/api/_as_gen/matplotlib.patches.Patch.html
         """
         vert = False
         if vert:
@@ -592,8 +596,8 @@ class Plotter(object):
                     edgecolor='k') #all in one plot
         else:
             fig, ax = plt.subplots(
-                    #figsize=(10, 20), # all molecules
-                    figsize=(20, 10), 
+                    figsize=(10, 20), # all molecules
+                    #figsize=(20, 10), 
                     edgecolor='k') #all in one plot
             x_list = x_list[::-1]          
             x_list2 = x_list2[::-1]          
@@ -604,25 +608,29 @@ class Plotter(object):
                             widths=0.95, #width of each violin dist
                             showextrema=False, #remove min/max line
                         )
-
+        
         for pc in sc1["bodies"]:
             # plt.colors.to_rgba(c, alpha=None)
-            pc.set_facecolor("red")
-            #pc.set_edgecolor("red")
-            pc.set_alpha(0.8)
-            #pc.set_linewidth(3) 
+            #pc.set_facecolor(color_list[0])
+            pc.set_facecolor("none")
+            pc.set_edgecolor(color_list[0])
+            pc.set_linestyle("dashed")
+            pc.set_alpha(1) #0.8)
+            pc.set_linewidth(3) 
             if vert:
                 # for vertical plots
                 paths = pc.get_paths()[0]
                 mean = np.mean(paths.vertices[:, 0])
-                paths.vertices[:, 0][paths.vertices[:, 0] <= mean] = mean
+                # paths.vertices[:, 0][paths.vertices[:, 0] <= mean] = mean
+                # to mirror violin plots
                 #pc.get_paths()[0].vertices[:, 0] = np.clip(pc.get_paths()[0].vertices[:, 0], -np.inf, mean)
             else:
                 # for horizontal plots
                 paths = pc.get_paths()[0]
                 mean = np.mean(paths.vertices[:, 1])
-                paths.vertices[:, 1][paths.vertices[:, 1] <= mean] = mean
-                # pc.get_paths()[0].vertices[:, 1] = np.clip(pc.get_paths()[0].vertices[:, 1], mean, np.inf)                
+                # paths.vertices[:, 1][paths.vertices[:, 1] <= mean] = mean
+                # to mirror violin plots
+                #pc.get_paths()[0].vertices[:, 1] = np.clip(pc.get_paths()[0].vertices[:, 1], mean, np.inf)              
 
 
         sc2 = ax.violinplot(x_list2, #list of vals
@@ -631,21 +639,26 @@ class Plotter(object):
                             showextrema=False, #remove min/max line
                         )
         for pc in sc2["bodies"]:
-            pc.set_facecolor("tab:blue")
+            #pc.set_facecolor(color_list[1])
+            pc.set_facecolor("none")
             #pc.set_edgecolor("tab:blue")
-            pc.set_alpha(0.8)
-            #pc.set_linewidth(3) 
+            pc.set_edgecolor(color_list[1])
+            pc.set_linestyle("dashed")
+            pc.set_alpha(1) #0.8)
+            pc.set_linewidth(3) 
             if vert:
                 # for vertical plots
                 paths = pc.get_paths()[0]
                 mean = np.mean(paths.vertices[:, 0])
-                paths.vertices[:, 0][paths.vertices[:, 0] <= mean] = mean
+                # paths.vertices[:, 0][paths.vertices[:, 0] <= mean] = mean
+                # to mirror violin plots
                 #pc.get_paths()[0].vertices[:, 0] = np.clip(pc.get_paths()[0].vertices[:, 0], mean, np.inf)
             else:
                 # for horizontal plots
                 paths = pc.get_paths()[0]
                 mean = np.mean(paths.vertices[:, 1])
-                paths.vertices[:, 1][paths.vertices[:, 1] <= mean] = mean
+                #paths.vertices[:, 1][paths.vertices[:, 1] <= mean] = mean
+                # to mirror violin plots
                 #pc.get_paths()[0].vertices[:, 1] = np.clip(pc.get_paths()[0].vertices[:, 1], -np.inf, mean)                
 
 

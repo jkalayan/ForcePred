@@ -1,6 +1,5 @@
 
 !!!! PLEASE NOTE, THIS FILE IS IN PROGRESS !!!! 
-ANYTHING BELOW THE LINE MIGHT NOT BE RELEVANT
 
 
 1.  Before running a job, install the conda environment by running 
