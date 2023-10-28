@@ -3,7 +3,7 @@
 
 
 1.  Before running a job, install the conda environment by running 
-    ./create_conda_env.sh on the command line in this directory.
+    ./create_conda_env.sh on the command line in the scripts directory.
     This will install a conda environment in your $HOME directory called 
     updated_ml_env from the updated_ml_env.yml file which contains all the 
     Python libraries needed to run ForcePred. The installation could take 
